@@ -1,0 +1,694 @@
+/* ใช้ของ frappe-gantt ให้แสดง bar สวย ๆ */
+@import 'frappe-gantt/dist/frappe-gantt.css';
+
+/* ------------ Base reset & layout ------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* ให้ body ธรรมดา และ body.app-body ใช้ฟอนต์ / สีเดียวกัน */
+body,
+body.app-body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  background-color: #f1f5f9; /* slate-100 */
+  color: #0f172a; /* slate-900 */
+}
+
+#__next {
+  height: 100%;
+}
+
+/* ------------ App shell ------------ */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+
+.app-sidebar {
+  width: 240px;
+  background: rgba(255, 255, 255, 0.96);
+  border-right: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-sidebar-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 14px;
+  background: #fbeaec;
+  color: #8b2332;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-logo-text-main {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.app-logo-text-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.app-sidebar-section-title {
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.app-sidebar-nav {
+  padding: 4px 8px 12px;
+}
+
+.app-sidebar-nav button {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.app-sidebar-nav button:hover {
+  background-color: #f1f5f9;
+}
+
+.app-sidebar-nav button.is-active {
+  background-color: #fbeaec;
+  color: #8b2332;
+  font-weight: 600;
+}
+
+.app-sidebar-footer {
+  margin-top: auto;
+  padding: 10px 16px 14px;
+  font-size: 12px;
+  color: #64748b;
+  border-top: 1px solid #e2e8f0;
+}
+
+.app-sidebar-footer-title {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* Filter selects */
+
+.filter-select {
+  width: 100%;
+  margin-top: 6px;
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+/* Main / topbar */
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+}
+
+.app-topbar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.app-topbar-subtitle {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.app-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-search {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background-color: #ffffff;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.app-search input {
+  border: none;
+  margin-left: 6px;
+  font-size: 13px;
+  width: 150px;
+  outline: none;
+  color: #0f172a;
+}
+
+.app-main-content {
+  padding: 12px 16px 20px;
+  flex: 1;
+}
+
+.app-card {
+  background-color: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 18px 45px -15px rgba(15, 23, 42, 0.25);
+  padding: 16px 18px;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ------------ Buttons ------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.btn-primary {
+  background-color: #8b2332;
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background-color: #6b1a26;
+}
+
+.btn-secondary {
+  background-color: #ffffff;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+}
+
+.btn-secondary:hover {
+  background-color: #f8fafc;
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: #475569;
+}
+
+.btn-ghost:hover {
+  background-color: #e2e8f0;
+}
+
+/* ------------ Summary cards ------------ */
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.summary-card {
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.summary-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 3px;
+  color: #94a3b8;
+}
+
+.summary-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.summary-label {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
+}
+
+.summary-card.in-progress {
+  background-color: #fffbeb;
+  border-color: #fed7aa;
+}
+
+.summary-card.done {
+  background-color: #ecfdf5;
+  border-color: #bbf7d0;
+}
+
+/* ------------ Gantt ------------ */
+
+.gantt-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.gantt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.gantt-title-main {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.gantt-title-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.gantt-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.gantt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gantt-legend-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.gantt-view-switch {
+  display: inline-flex;
+  background-color: #e2e8f0;
+  padding: 2px;
+  border-radius: 999px;
+  margin-top: 6px;
+}
+
+.gantt-view-switch button {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.gantt-view-switch button.is-active {
+  background-color: #ffffff;
+  color: #8b2332;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+
+.gantt-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 260px minmax(0,1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.gantt-tree {
+  border-radius: 12px 0 0 12px;
+  border: 1px solid #e2e8f0;
+  border-right: none;
+  background: #f8fafc;
+  padding: 58 10px; /**/
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-size: 13px;
+}
+
+.gantt-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  height: 42px;
+  padding: 0px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.gantt-tree-row:hover {
+  background: #e2e8f0;
+}
+
+.gantt-body {
+  position: relative;
+  border-radius: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.gantt-body::-webkit-scrollbar {
+  height: 6px;
+}
+
+.gantt-body::-webkit-scrollbar-thumb {
+  background-color: #cbd5f5;
+  border-radius: 999px;
+}
+
+.gantt-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.gantt-empty-sub {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* ------------ Modal, form, profile, login (ของเดิม) ------------ */
+/* (ยกมาทั้งก้อนของคุณต่อเลย – ผมจะไม่ซ้ำ @apply ซ้ำด้านล่างให้แล้ว) */
+
+.modal-backdrop { /* ... ตามไฟล์เดิมของคุณ ... */ }
+
+
+/* Profile pill on top-right */
+.profile-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.06);
+}
+
+.profile-pill-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.profile-pill-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.profile-pill-role {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* ปรับ avatar ให้พอดีกับ pill */
+.profile-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Login messages */
+.login-message {
+  font-size: 12px;
+  color: #15803d;
+}
+
+.login-error {
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+/* ทำปุ่ม Logout ให้เด่นขึ้น */
+.profile-menu-item-logout {
+  width: 100%;
+  text-align: left;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background-color: #fee2e2;
+  color: #991b1b;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.profile-menu-item-logout:hover {
+  background-color: #fecaca;
+}
+
+/* เผื่อไว้ให้ทุก profile-menu-item เป็นรูปมือเวลา hover */
+.profile-menu-item {
+  cursor: pointer;
+}
+
+
+/* ===== Modal overlay ===== */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0; /* top:0, right:0, bottom:0, left:0 */
+  background: rgba(15, 23, 42, 0.55); /* เงาดำโปร่ง */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50; /* ให้ลอยอยู่บนสุด */
+}
+
+.modal {
+  width: 100%;
+  max-width: 760px;
+  max-height: calc(100vh - 80px);
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 18px 20px 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e8f0;
+}
+
+/* header / body / footer layout */
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-title-main {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.modal-title-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.modal-body {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+  padding-bottom: 8px;
+  overflow: auto;
+}
+
+.modal-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* สองคอลัมน์ซ้าย-ขวา */
+
+.modal-form-grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+/* ฟอร์มย่อย */
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.field-label-small {
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: #8b2332;
+  box-shadow: 0 0 0 1px rgba(139, 35, 50, 0.25);
+}
+
+.textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
+/* progress range */
+
+.range-row {
+  margin-top: 8px;
+}
+
+.range-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.range-input {
+  width: 100%;
+}
+
+/* recurring toggle */
+
+.recurring-toggle {
+  margin-top: 4px;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px dashed #cbd5f5;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.recurring-toggle.recurring-on {
+  border-style: solid;
+  border-color: #8b2332;
+  background: #fbeaec;
+}
+
+/* buttons */
+
+.btn-secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+}
