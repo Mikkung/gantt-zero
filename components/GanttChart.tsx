@@ -16,31 +16,90 @@ interface GanttProps {
 
 type ViewMode = 'Day' | 'Week' | 'Month';
 
+// -------- helper: date utils --------
+function toDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatInputDate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// check ว่างานตัดกับ range หรือไม่
+function rangesIntersect(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  from: string | null,
+  to: string | null,
+): boolean {
+  if (!from && !to) return true;
+
+  const s = toDate(start) ?? toDate(end) ?? null;
+  const e = toDate(end) ?? toDate(start) ?? null;
+  if (!s && !e) return true;
+
+  const rStart = s ?? e!;
+  const rEnd = e ?? s!;
+
+  const f = from ? toDate(from)! : null;
+  const t = to ? toDate(to)! : null;
+
+  if (f && rEnd < f) return false;
+  if (t && rStart > t) return false;
+  return true;
+}
+
 export default function GanttChart({
   tasks,
   onTaskUpdate,
   onTaskClick,
 }: GanttProps) {
   const ganttRef = useRef<HTMLDivElement | null>(null);
+
   const [viewMode, setViewMode] = useState<ViewMode>('Week');
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(
     () => new Set(),
   );
 
+  // ช่วงวันที่ให้ user เลือก
+  const [viewFrom, setViewFrom] = useState<string | null>(null);
+  const [viewTo, setViewTo] = useState<string | null>(null);
+
+  // default: 7 วันก่อนวันนี้ → 90 วันหลังจากวันนี้
+  useEffect(() => {
+    const today = new Date();
+    const from = new Date(today);
+    from.setDate(from.getDate() - 7);
+
+    const to = new Date(today);
+    to.setDate(to.getDate() + 90);
+
+    setViewFrom(formatInputDate(from));
+    setViewTo(formatInputDate(to));
+  }, []);
+
+  // 1) filter งานตามช่วงวันที่
+  const dateFilteredTasks = useMemo(() => {
+    return (tasks || []).filter((t) =>
+      rangesIntersect(t.start_date, t.end_date, viewFrom, viewTo),
+    );
+  }, [tasks, viewFrom, viewTo]);
+
   /**
-   * เตรียมข้อมูล tree + ลำดับ row กลาง (visibleTasks)
-   * - childrenByParent: mapping parent_id → children
-   * - visibleTasks: array ตามลำดับที่ต้องการให้แสดง (ทั้ง tree และ Gantt)
-   * - depthById: ใช้กำหนด indent ของแต่ละ row ทางฝั่ง tree
+   * 2) เตรียม tree + ลำดับ row สำหรับทั้ง tree & Gantt
    */
   const {
     childrenByParent,
     visibleTasks,
     depthById,
   } = useMemo(() => {
-    const all = tasks || [];
+    const all = dateFilteredTasks || [];
 
-    // 1) group ตาม parent
     const childrenByParent: Record<string, Task[]> = {};
     all.forEach((t) => {
       const key = t.parent_id || 'root';
@@ -48,7 +107,6 @@ export default function GanttChart({
       childrenByParent[key].push(t);
     });
 
-    // 2) flatten tree เป็นลิสต์เดียว พร้อม depth และเคารพ collapsedParents
     const flat: Task[] = [];
     const depthById: Record<string, number> = {};
 
@@ -58,17 +116,12 @@ export default function GanttChart({
       parentHidden: boolean,
     ) => {
       const list = childrenByParent[parentId || 'root'] || [];
-
       for (const t of list) {
         const isCollapsed = collapsedParents.has(t.id);
-
-        // parentHidden = true => แถวนี้ก็ไม่ต้องแสดง (เพราะ parent ถูกพับ)
         if (!parentHidden) {
           flat.push(t);
           depthById[t.id] = depth;
         }
-
-        // ถ้า parent ถูกพับ หรือ parentHidden อยู่แล้ว → children ไม่ต้องแสดง
         const nextHidden = parentHidden || isCollapsed;
         walk(t.id, depth + 1, nextHidden);
       }
@@ -77,9 +130,9 @@ export default function GanttChart({
     walk(null, 0, false);
 
     return { childrenByParent, visibleTasks: flat, depthById };
-  }, [tasks, collapsedParents]);
+  }, [dateFilteredTasks, collapsedParents]);
 
-  // ====== สร้าง / อัปเดต Gantt ======
+  // 3) สร้าง / อัปเดต Gantt
   useEffect(() => {
     if (!ganttRef.current || visibleTasks.length === 0) {
       if (ganttRef.current) ganttRef.current.innerHTML = '';
@@ -88,17 +141,43 @@ export default function GanttChart({
 
     ganttRef.current.innerHTML = '';
 
-    const ganttTasks = visibleTasks.map((t) => ({
-      id: t.id,
-      name: t.name,
-      start: t.start_date,
-      end: t.end_date,
-      progress: t.progress ?? 0,
-      dependencies: t.dependencies || '',
-      custom_class: `status-${(t.status || '')
-        .toLowerCase()
-        .replace(/\s/g, '')}`,
-    }));
+    const fromD = viewFrom ? toDate(viewFrom) : null;
+    const toD = viewTo ? toDate(viewTo) : null;
+
+    const ganttTasks = visibleTasks.map((t) => {
+      const origStart = toDate(t.start_date);
+      const origEnd = toDate(t.end_date);
+
+      let displayStart = origStart;
+      let displayEnd = origEnd;
+
+      // clamp ให้ไม่ออกนอก view range
+      if (fromD && displayStart && displayStart < fromD) {
+        displayStart = fromD;
+      }
+      if (toD && displayEnd && displayEnd > toD) {
+        displayEnd = toD;
+      }
+
+      const startStr =
+        displayStart != null
+          ? formatInputDate(displayStart)
+          : t.start_date;
+      const endStr =
+        displayEnd != null ? formatInputDate(displayEnd) : t.end_date;
+
+      return {
+        id: t.id,
+        name: t.name,
+        start: startStr,
+        end: endStr,
+        progress: t.progress ?? 0,
+        dependencies: t.dependencies || '',
+        custom_class: `status-${(t.status || '')
+          .toLowerCase()
+          .replace(/\s/g, '')}`,
+      };
+    });
 
     const gantt = new Gantt(ganttRef.current, ganttTasks, {
       view_mode: viewMode,
@@ -177,13 +256,79 @@ export default function GanttChart({
       },
     });
 
+    // scroll ให้ไปใกล้ viewFrom (หรือใช้ start งานอันแรก ถ้าไม่มี)
     try {
-      gantt.set_scroll_position(new Date());
+      const target =
+        (viewFrom && toDate(viewFrom)) ??
+        (visibleTasks[0]?.start_date
+          ? toDate(visibleTasks[0].start_date)!
+          : new Date());
+      gantt.set_scroll_position(target);
     } catch {
       // ignore
     }
-  }, [visibleTasks, viewMode, onTaskClick, onTaskUpdate]);
 
+    // ====== วาดเส้น Today ลงใน SVG ของ Gantt ======
+    try {
+      const svgEl: SVGSVGElement | null = (gantt as any).$svg || null;
+      const ganttStart: Date | undefined = (gantt as any).gantt_start;
+      const ganttEnd: Date | undefined = (gantt as any).gantt_end;
+
+      if (svgEl && ganttStart && ganttEnd) {
+        // ลบเส้นเก่าก่อน (กันซ้อน)
+        svgEl
+          .querySelectorAll('.today-highlight-line')
+          .forEach((el) => el.parentNode?.removeChild(el));
+
+        const gridBgRect = svgEl.querySelector(
+          '.grid .grid-background',
+        ) as SVGRectElement | null;
+
+        if (!gridBgRect) return;
+
+        const width = parseFloat(gridBgRect.getAttribute('width') || '0');
+        const height = parseFloat(gridBgRect.getAttribute('height') || '0');
+
+        const today = new Date();
+        const todayMidnight = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+        );
+
+        const startMs = ganttStart.getTime();
+        const endMs = ganttEnd.getTime();
+        const todayMs = todayMidnight.getTime();
+
+        // วาดเฉพาะถ้าวันนี้อยู่ในช่วงของ Gantt
+        if (todayMs >= startMs && todayMs <= endMs && width > 0) {
+          const ratio = (todayMs - startMs) / (endMs - startMs || 1);
+          const x = ratio * width;
+
+          const line = document.createElementNS(
+            'http://www.w3.org/2000/svg',
+            'line',
+          );
+          line.setAttribute('class', 'today-highlight-line');
+          line.setAttribute('x1', String(x));
+          line.setAttribute('x2', String(x));
+          line.setAttribute('y1', '0');
+          line.setAttribute('y2', String(height || 9999));
+          line.setAttribute('stroke', '#ef4444');
+          line.setAttribute('stroke-width', '2');
+          line.setAttribute('stroke-dasharray', '4 2');
+
+          const gridGroup =
+            svgEl.querySelector('.grid') || svgEl.firstChild;
+          gridGroup?.appendChild(line);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to draw today line', e);
+    }
+  }, [visibleTasks, viewMode, onTaskClick, onTaskUpdate, viewFrom, viewTo]);
+
+  // toggle tree
   const toggleCollapse = (id: string) => {
     setCollapsedParents((prev) => {
       const next = new Set(prev);
@@ -194,6 +339,17 @@ export default function GanttChart({
   };
 
   const hasTasks = visibleTasks.length > 0;
+
+  const handleTodayRange = () => {
+    const t = new Date();
+    const from = new Date(t);
+    from.setDate(from.getDate() - 7);
+    const to = new Date(t);
+    to.setDate(to.getDate() + 90);
+
+    setViewFrom(formatInputDate(from));
+    setViewTo(formatInputDate(to));
+  };
 
   return (
     <div className="gantt-wrapper">
@@ -206,6 +362,7 @@ export default function GanttChart({
         </div>
 
         <div style={{ textAlign: 'right' }}>
+          {/* legend */}
           <div className="gantt-legend">
             <div className="gantt-legend-item">
               <span
@@ -230,17 +387,72 @@ export default function GanttChart({
             </div>
           </div>
 
-          <div className="gantt-view-switch">
-            {(['Day', 'Week', 'Month'] as ViewMode[]).map((mode) => (
+          {/* view mode + date range */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 12,
+              marginTop: 6,
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <div style={{ fontSize: 11, color: '#64748b' }}>
+              View range{' '}
+              <input
+                type="date"
+                value={viewFrom ?? ''}
+                onChange={(e) => setViewFrom(e.target.value || null)}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 4px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5f5',
+                  marginLeft: 4,
+                }}
+              />{' '}
+              to{' '}
+              <input
+                type="date"
+                value={viewTo ?? ''}
+                onChange={(e) => setViewTo(e.target.value || null)}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 4px',
+                  borderRadius: 6,
+                  border: '1px solid #cbd5f5',
+                  marginLeft: 4,
+                }}
+              />
               <button
-                key={mode}
                 type="button"
-                className={mode === viewMode ? 'is-active' : ''}
-                onClick={() => setViewMode(mode)}
+                onClick={handleTodayRange}
+                style={{
+                  marginLeft: 6,
+                  fontSize: 11,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  border: '1px solid #e2e8f0',
+                  background: '#ffffff',
+                  cursor: 'pointer',
+                }}
               >
-                {mode}
+                Today + range
               </button>
-            ))}
+            </div>
+
+            <div className="gantt-view-switch">
+              {(['Day', 'Week', 'Month'] as ViewMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={mode === viewMode ? 'is-active' : ''}
+                  onClick={() => setViewMode(mode)}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -293,8 +505,8 @@ export default function GanttChart({
             <div className="gantt-empty">
               <div>No tasks scheduled yet</div>
               <div className="gantt-empty-sub">
-                Create a task with start and end dates to see it on the
-                timeline.
+                Create a task with start and end dates to see it on
+                the timeline.
               </div>
             </div>
           )}
