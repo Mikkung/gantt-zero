@@ -588,6 +588,16 @@ body.app-body {
   overflow: auto;
 }
 
+.gantt-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(239, 68, 68, 0.95); /* แดงประมาณ red-500 */
+  pointer-events: none;
+  z-index: 15;
+}
+
 .modal-footer {
   margin-top: 8px;
   padding-top: 8px;
@@ -691,4 +701,52 @@ body.app-body {
 .btn-secondary {
   background: #e2e8f0;
   color: #0f172a;
+}
+
+/* ====== Gantt: date range controls ====== */
+
+.gantt-date-filters {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.gantt-date-label {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.gantt-date-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.gantt-date-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.gantt-date-controls input[type='date'] {
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+}
+
+.gantt-date-reset {
+  padding-inline: 10px;
+  font-size: 11px;
+}
+
+/* ====== TODAY highlight ของ frappe-gantt ====== */
+
+.today-highlight {
+  /* พื้นหลังคอลัมน์ของวันนี้ */
+  fill: rgba(239, 68, 68, 0.08) !important; /* red-500 เบาๆ */
+  stroke: rgba(239, 68, 68, 0.4) !important;
+  stroke-width: 1px !important;
 }
