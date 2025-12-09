@@ -27,7 +27,7 @@ interface TaskModalProps {
 
   // ทำเป็น optional แล้วให้ default เป็น [] ในตัว component
   users?: Profile[];
-
+  currentUser?: Profile | null;
   canEdit?: boolean; // ถ้า false = view only
   onClose: () => void;
   onSave: (partial: Partial<Task>) => void;
@@ -39,6 +39,7 @@ export default function TaskModal({
   task,
   allTasks,
   users = [], // 👈 ป้องกัน undefined ที่นี่
+  currentUser,
   canEdit = true,
   onClose,
   onSave,
