@@ -525,7 +525,7 @@ export default function TaskModal({
                 </select>
               </div>
 
-              <div style={{ marginTop: 12 }}>
+              {/*<div style={{ marginTop: 12 }}>
                 <div className="field-label">Recurring</div>
                 <button
                   type="button"
@@ -585,7 +585,7 @@ export default function TaskModal({
                     </select>
                   </div>
                 )}
-              </div>
+              </div>*/}
 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">
