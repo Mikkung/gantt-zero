@@ -30,7 +30,7 @@ export interface Task {
   name: string;
   start_date: string | null;
   end_date: string | null;
-  status: 'To Do' | 'In Progress' | 'Blocked' | 'Done';
+  status: 'To Do' | 'In Progress' | 'Blocked' | 'In problem Need Help'| 'Done';
   priority: 'Low' | 'Medium' | 'High';
   progress: number;
   assignee: string | null;

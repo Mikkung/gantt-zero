@@ -4,19 +4,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Task, Profile } from '../types';
 
+// ถ้าคุณย้าย WorkType ไปไว้ใน types.ts แล้ว export ก็ลบ type นี้ออกได้
 export type WorkType =
-  | 'routine'              // งานประจำ
-  | 'strategic'            // งานยุทธศาสตร์
-  | 'process_improvement'  // งานพัฒนากระบวนการ
-  | 'self_development'     // งานพัฒนาตนเอง
-  | 'other';               // งานอื่นๆ
+  | 'routine' // งานประจำ
+  | 'strategic' // งานยุทธศาสตร์
+  | 'process_improvement' // งานพัฒนากระบวนการ
+  | 'self_development' // งานพัฒนาตนเอง
+  | 'other'; // งานอื่นๆ
 
 const WORK_TYPE_OPTIONS: { value: WorkType; label: string }[] = [
-  { value: 'routine',             label: 'งานประจำ' },
-  { value: 'strategic',           label: 'งานยุทธศาสตร์' },
+  { value: 'routine', label: 'งานประจำ' },
+  { value: 'strategic', label: 'งานยุทธศาสตร์' },
   { value: 'process_improvement', label: 'งานพัฒนากระบวนการ' },
-  { value: 'self_development',    label: 'งานพัฒนาตนเอง' },
-  { value: 'other',               label: 'งานอื่นๆ' },
+  { value: 'self_development', label: 'งานพัฒนาตนเอง' },
+  { value: 'other', label: 'งานอื่นๆ' },
 ];
 
 interface TaskModalProps {
@@ -24,11 +25,8 @@ interface TaskModalProps {
   task: Task | null;
   allTasks: Task[];
 
-  // list user จาก profiles ใช้สำหรับ assignee
+  // ทำเป็น optional แล้วให้ default เป็น [] ในตัว component
   users?: Profile[];
-
-  // current user (ใช้ set default assignee)
-  currentUser?: Profile | null;
 
   canEdit?: boolean; // ถ้า false = view only
   onClose: () => void;
@@ -40,8 +38,7 @@ export default function TaskModal({
   isOpen,
   task,
   allTasks,
-  users = [],
-  currentUser = null,
+  users = [], // 👈 ป้องกัน undefined ที่นี่
   canEdit = true,
   onClose,
   onSave,
@@ -58,13 +55,7 @@ export default function TaskModal({
   const [status, setStatus] = useState<Task['status']>('To Do');
   const [priority, setPriority] = useState<Task['priority']>('Medium');
   const [progress, setProgress] = useState<number>(0);
-
-  // assignee เก็บค่าที่จะบันทึกลง DB (string – display_name หรือ email)
   const [assignee, setAssignee] = useState<string | null>(null);
-  // ข้อความที่อยู่ใน input (ใช้ทำ autocomplete)
-  const [assigneeInput, setAssigneeInput] = useState('');
-  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
-
   const [parentId, setParentId] = useState<string | null>(null);
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
   const [recurringType, setRecurringType] =
@@ -75,38 +66,38 @@ export default function TaskModal({
     useState<Task['recurring_unit']>('month');
   const [dependencies, setDependencies] = useState<string | null>(null);
 
-  // ประเภทงาน – ตั้ง default เป็น routine
-  const [workType, setWorkType] = useState<WorkType | ''>('routine');
+  // ประเภทงาน
+  const [workType, setWorkType] = useState<WorkType | ''>('');
 
-  // ====== สร้าง suggestions ของ assignee จาก users ======
-  const assigneeSuggestions: Profile[] = useMemo(() => {
-    const keyword = assigneeInput.trim().toLowerCase();
-    const list = users || [];
+  // suggestions ของ assignee (จาก profiles)
+  const assigneeSuggestions = useMemo(() => {
+    const list = users || []; // กันเหนียวอีกรอบ
+    const names = new Set<string>();
 
-    const filtered = !keyword
-      ? list
-      : list.filter((u) => {
-          const name = (u.display_name || '').toLowerCase();
-          const email = (u.email || '').toLowerCase();
-          return (
-            name.includes(keyword) ||
-            email.includes(keyword)
-          );
-        });
+    list.forEach((u) => {
+      if (u.display_name) names.add(u.display_name);
+      // ถ้าอยากใช้ email ด้วยก็ใส่เพิ่ม
+      // if (u.email) names.add(u.email);
+    });
 
-    return [...filtered].sort((a, b) =>
-      (a.display_name || a.email || '').localeCompare(
-        b.display_name || b.email || '',
-      ),
-    );
-  }, [users, assigneeInput]);
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [users]);
 
-  // ====== โหลดค่าเมื่อเปิด modal ======
+  // helper: สร้าง string วันที่แบบ yyyy-mm-dd ด้วย local time (กัน timezone เพี้ยน)
+  const getTodayString = () => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  // เมื่อเปิด modal โหลดค่าจาก task เดิม
   useEffect(() => {
     if (!isOpen) return;
 
     if (task) {
-      // ----- edit -----
+      // ----- Edit mode -----
       setName(task.name);
       setDescription(task.description ?? '');
       setStartDate(task.start_date);
@@ -114,89 +105,89 @@ export default function TaskModal({
       setStatus(task.status);
       setPriority(task.priority);
       setProgress(task.progress ?? 0);
-
       setAssignee(task.assignee);
-      setAssigneeInput(task.assignee ?? '');
       setParentId(task.parent_id ?? null);
       setIsRecurring(task.is_recurring ?? false);
       setRecurringType(task.recurring_type ?? 'none');
       setRecurringInterval(task.recurring_interval ?? null);
       setRecurringUnit(task.recurring_unit ?? 'month');
       setDependencies(task.dependencies ?? '');
-      setWorkType(
-        (task.work_type as WorkType | null) ?? 'routine',
-      );
+      setWorkType((task.work_type as WorkType | null) ?? '');
     } else {
-      // ----- create ใหม่ -----
+      // ----- Create mode: reset + default -----
       setName('');
       setDescription('');
-      setStartDate(null);
+
+      // ✅ Start date default = วันนี้
+      const today = getTodayString();
+      setStartDate(today);
+
       setEndDate(null);
       setStatus('To Do');
       setPriority('Medium');
       setProgress(0);
+      setAssignee(null);
       setParentId(null);
       setIsRecurring(false);
       setRecurringType('none');
       setRecurringInterval(null);
       setRecurringUnit('month');
       setDependencies('');
-      setWorkType('routine'); // default งานประจำ
-
-      // assignee default = current user
-      if (currentUser) {
-        const label =
-          currentUser.display_name || currentUser.email || '';
-        setAssignee(label);
-        setAssigneeInput(label);
-      } else {
-        setAssignee(null);
-        setAssigneeInput('');
-      }
+      setWorkType('');
     }
-
-    setAssigneeDropdownOpen(false);
-  }, [isOpen, task, currentUser]);
+  }, [isOpen, task]);
 
   if (!isOpen) return null;
 
-  // ====== validate required fields & ส่งค่าออกไป ======
+  // ===== Logic: ผูก Progress ↔ Status =====
+
+  const handleProgressChange = (value: number) => {
+    setProgress(value);
+
+    setStatus((prev) => {
+      // ถ้า status = Blocked หรือ Need Help → ให้ user control เอง ไม่ auto เปลี่ยน
+      if (
+        prev === 'Blocked' ||
+        prev === 'In problem Need Help'
+      ) {
+        return prev;
+      }
+
+      if (value === 0) {
+        return 'To Do';
+      }
+      if (value === 100) {
+        return 'Done';
+      }
+      // 0 < progress < 100
+      return 'In Progress';
+    });
+  };
+
+  const handleStatusChange = (newStatus: Task['status']) => {
+    setStatus(newStatus);
+
+    setProgress((prev) => {
+      if (newStatus === 'Done') {
+        // ✅ ถ้าเลือก Done → progress = 100
+        return 100;
+      }
+      if (newStatus === 'To Do') {
+        // ✅ ถ้าเลือก To Do → progress = 0
+        return 0;
+      }
+      // In Progress / Blocked / In problem Need Help ไม่บังคับ progress
+      return prev;
+    });
+  };
+
   const handleSubmit = () => {
     if (!canEdit) {
       onClose();
       return;
     }
-
-    const missing: string[] = [];
-
-    if (!name.trim()) missing.push('Task name');
-    if (!startDate) missing.push('Start date');
-    if (!endDate) missing.push('End date');
-
-    // ตรวจว่า assignee เลือกจากรายชื่อจริง ๆ
-    const assigneeValid =
-      !!assignee &&
-      users.some(
-        (u) =>
-          u.display_name === assignee ||
-          u.email === assignee,
-      );
-
-    if (!assigneeValid) {
-      missing.push(
-        'Assignee (กรุณาเลือกจากรายชื่อในระบบ ไม่พิมพ์เอง)',
-      );
-    }
-
-    if (!workType) {
-      missing.push('ประเภทงาน');
-    }
-
-    if (missing.length > 0) {
-      alert(
-        'Please fill all required fields:\n- ' +
-          missing.join('\n- '),
-      );
+    if (!name.trim()) {
+      alert('Please enter a task name.');
       return;
     }
 
@@ -209,14 +200,14 @@ export default function TaskModal({
       status,
       priority,
       progress,
-      assignee, // string จากรายชื่อ
+      assignee,
       parent_id: parentId,
       is_recurring: isRecurring,
       recurring_type: isRecurring ? recurringType : 'none',
       recurring_interval: isRecurring ? recurringInterval : null,
       recurring_unit: isRecurring ? recurringUnit : null,
       dependencies,
-      work_type: workType || null,
+      work_type: workType || null, // 👈 บันทึกประเภทงาน
     });
   };
 
@@ -224,19 +215,6 @@ export default function TaskModal({
     if (!task || !task.id || !canEdit) return;
     if (!confirm('Delete this task?')) return;
     onDelete(task.id);
-  };
-
-  const handleAssigneeChange = (value: string) => {
-    setAssigneeInput(value);
-    setAssignee(value || null);
-    setAssigneeDropdownOpen(true);
-  };
-
-  const handleAssigneeSelect = (u: Profile) => {
-    const label = u.display_name || u.email || '';
-    setAssignee(label);
-    setAssigneeInput(label);
-    setAssigneeDropdownOpen(false);
   };
 
   return (
@@ -269,10 +247,7 @@ export default function TaskModal({
           <div className="modal-form-grid-2">
             {/* Left column */}
             <div>
-              <div className="field-label">
-                Task name{' '}
-                <span style={{ color: '#dc2626' }}>*</span>
-              </div>
+              <div className="field-label">Task name</div>
               <input
                 className="input"
                 value={name}
@@ -297,8 +272,7 @@ export default function TaskModal({
               <div style={{ marginTop: 14 }}>
                 <div className="field-label">Scheduling</div>
                 <div className="field-label-small">
-                  Start date{' '}
-                  <span style={{ color: '#dc2626' }}>*</span>
+                  Start date
                 </div>
                 <input
                   type="date"
@@ -313,8 +287,7 @@ export default function TaskModal({
                   className="field-label-small"
                   style={{ marginTop: 6 }}
                 >
-                  End date{' '}
-                  <span style={{ color: '#dc2626' }}>*</span>
+                  End date
                 </div>
                 <input
                   type="date"
@@ -329,13 +302,10 @@ export default function TaskModal({
 
               {/* Work type */}
               <div style={{ marginTop: 14 }}>
-                <div className="field-label">
-                  ประเภทงาน{' '}
-                  <span style={{ color: '#dc2626' }}>*</span>
-                </div>
+                <div className="field-label">ประเภทงาน</div>
                 <select
                   className="select"
-                  value={workType || 'routine'}
+                  value={workType || ''}
                   onChange={(e) =>
                     setWorkType(
                       (e.target.value ||
@@ -344,8 +314,12 @@ export default function TaskModal({
                   }
                   disabled={disabled}
                 >
+                  <option value="">(ไม่ระบุ)</option>
                   {WORK_TYPE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
+                    <option
+                      key={opt.value}
+                      value={opt.value}
+                    >
                       {opt.label}
                     </option>
                   ))}
@@ -358,26 +332,36 @@ export default function TaskModal({
               <div className="field-label">
                 Status &amp; priority
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                }}
+              >
                 <div style={{ flex: 1 }}>
                   <div className="field-label-small">
-                    Status{' '}
-                    <span style={{ color: '#dc2626' }}>*</span>
+                    Status
                   </div>
                   <select
                     className="select"
                     value={status}
                     onChange={(e) =>
-                      setStatus(
+                      handleStatusChange(
                         e.target.value as Task['status'],
                       )
                     }
                     disabled={disabled}
                   >
-                    <option>To Do</option>
-                    <option>In Progress</option>
-                    <option>Blocked</option>
-                    <option>Done</option>
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">
+                      In Progress
+                    </option>
+                    <option value="Blocked">Blocked</option>
+                    {/* ✅ status ใหม่ */}
+                    <option value="In problem Need Help">
+                      In problem – Need Help
+                    </option>
+                    <option value="Done">Done</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
@@ -389,7 +373,8 @@ export default function TaskModal({
                     value={priority}
                     onChange={(e) =>
                       setPriority(
-                        e.target.value as Task['priority'],
+                        e.target
+                          .value as Task['priority'],
                       )
                     }
                     disabled={disabled}
@@ -418,90 +403,32 @@ export default function TaskModal({
                   step={5}
                   value={progress}
                   onChange={(e) =>
-                    setProgress(Number(e.target.value))
+                    handleProgressChange(
+                      Number(e.target.value),
+                    )
                   }
                   disabled={disabled}
                 />
               </div>
 
-              {/* Assignee with custom autocomplete */}
-              <div
-                style={{ marginTop: 12, position: 'relative' }}
-              >
-                <div className="field-label">
-                  Assignee{' '}
-                  <span style={{ color: '#dc2626' }}>*</span>
-                </div>
+              {/* Assignee with autocomplete */}
+              <div style={{ marginTop: 12 }}>
+                <div className="field-label">Assignee</div>
                 <input
                   className="input"
-                  value={assigneeInput}
+                  list="assignee-options"
+                  value={assignee ?? ''}
                   onChange={(e) =>
-                    handleAssigneeChange(e.target.value)
+                    setAssignee(e.target.value || null)
                   }
-                  placeholder="Name or email (เลือกจากรายชื่อ)"
+                  placeholder="Name or email"
                   disabled={disabled}
-                  onFocus={() =>
-                    !disabled &&
-                    setAssigneeDropdownOpen(true)
-                  }
-                  onBlur={() =>
-                    setTimeout(
-                      () =>
-                        setAssigneeDropdownOpen(false),
-                      150,
-                    )
-                  }
                 />
-                {assigneeDropdownOpen &&
-                  !disabled &&
-                  assigneeSuggestions.length > 0 && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: 0,
-                        right: 0,
-                        background: '#ffffff',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 8,
-                        marginTop: 4,
-                        maxHeight: 180,
-                        overflowY: 'auto',
-                        zIndex: 30,
-                        fontSize: 13,
-                      }}
-                    >
-                      {assigneeSuggestions.map((u) => (
-                        <div
-                          key={u.id}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            handleAssigneeSelect(u);
-                          }}
-                          style={{
-                            padding: '6px 10px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            flexDirection: 'column',
-                          }}
-                        >
-                          <span>
-                            {u.display_name || u.email}
-                          </span>
-                          {u.display_name && u.email && (
-                            <span
-                              style={{
-                                fontSize: 11,
-                                color: '#94a3b8',
-                              }}
-                            >
-                              {u.email}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                <datalist id="assignee-options">
+                  {assigneeSuggestions.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
               </div>
 
               <div style={{ marginTop: 12 }}>
@@ -525,6 +452,7 @@ export default function TaskModal({
                 </select>
               </div>
 
+              {/* Recurring (ตอนนี้อาจไม่ได้ใช้ แต่ผมยังไม่ยุ่ง) */}
               {/*<div style={{ marginTop: 12 }}>
                 <div className="field-label">Recurring</div>
                 <button
@@ -535,11 +463,14 @@ export default function TaskModal({
                       : 'recurring-toggle'
                   }
                   onClick={() =>
-                    !disabled && setIsRecurring((v) => !v)
+                    !disabled &&
+                    setIsRecurring((v) => !v)
                   }
                 >
                   <span>
-                    {isRecurring ? 'Repeats' : 'Does not repeat'}
+                    {isRecurring
+                      ? 'Repeats'
+                      : 'Does not repeat'}
                   </span>
                   <span>
                     {isRecurring ? 'Disable' : 'Enable'}
@@ -595,7 +526,9 @@ export default function TaskModal({
                   className="input"
                   value={dependencies ?? ''}
                   onChange={(e) =>
-                    setDependencies(e.target.value || null)
+                    setDependencies(
+                      e.target.value || null,
+                    )
                   }
                   placeholder="task-id-1, task-id-2"
                   disabled={disabled}
@@ -634,7 +567,8 @@ export default function TaskModal({
                   marginRight: 6,
                 }}
               >
-                You have view-only access with your current role.
+                You have view-only access with your
+                current role.
               </span>
             )}
             <button
