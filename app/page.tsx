@@ -246,16 +246,42 @@ export default function HomePage() {
     });
   }, [timeFilteredTasks, filterTeamId, filterAssignee]);
 
+  // tasks ที่ไม่มีลูก = leaf tasks (งานจริง)
+  const leafTasks = useMemo(() => {
+    const parentIds = new Set(
+      fullyFilteredTasks
+        .filter((t) => t.parent_id)         // แถวที่เป็นลูก
+        .map((t) => t.parent_id as string)  // id ของ parent
+    );
+
+    return fullyFilteredTasks.filter(
+      (t) => !parentIds.has(t.id)           // เอาเฉพาะตัวที่ไม่มีใครอ้างเป็น parent
+    );
+  }, [fullyFilteredTasks]);
+
+
   const summary = useMemo(() => {
     const total = fullyFilteredTasks.length;
     const inProgress = fullyFilteredTasks.filter(
       (t) => t.status === 'In Progress',
     ).length;
+
     const done = fullyFilteredTasks.filter((t) => t.status === 'Done').length;
-    const withoutDates = fullyFilteredTasks.filter(
-      (t) => !t.start_date || !t.end_date,
-    ).length;
-    return { total, inProgress, done, withoutDates };
+    
+    const now = new Date();  
+    const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    );
+
+    const overdue = fullyFilteredTasks.filter((t) => {
+      if (!t.end_date) return false;
+      const end = new Date(t.end_date);
+      return end < now && t.status !== 'Done';
+    }).length;
+    
+    return { total, inProgress, done, overdue };
   }, [fullyFilteredTasks]);
 
   const totalLabel = summary.total === 1 ? 'task' : 'tasks';
@@ -643,13 +669,24 @@ export default function HomePage() {
       activeAssignee={filterAssignee}
       onSelectTeam={setFilterTeamId}
       onSelectAssignee={setFilterAssignee}
+
       onFilterMyTasks={() => {
         if (!currentProfile) return;
         const found = users.find((u) => u.id === currentProfile.id);
-        if (found) setFilterAssignee(found.display_name);
+        if (!found) return;
+
+        setFilterAssignee((prev) =>
+          prev === found.display_name ? null : found.display_name,
+        );
       }}
-      onFilterThisWeek={() => setFilterDateRange('thisWeek')}
-      onFilterOverdue={() => setFilterDateRange('overdue')}
+
+      onFilterThisWeek={() => 
+        setFilterDateRange((prev) => (prev === 'thisWeek' ? 'all' : 'thisWeek'))
+      }
+      onFilterOverdue={() => 
+         setFilterDateRange((prev) => (prev === 'overdue' ? 'all' : 'overdue'))
+      }
+      
       currentProfile={currentProfile}
       onSignIn={handleSignIn}
       onSignOut={handleSignOut}
@@ -682,8 +719,8 @@ export default function HomePage() {
           </div>
 
           <div className="summary-card">
-            <div className="summary-title">Missing dates</div>
-            <div className="summary-value">{summary.withoutDates}</div>
+            <div className="summary-title">Overdue</div>
+            <div className="summary-value">{summary.overdue}</div>
           </div>
         </div>
 

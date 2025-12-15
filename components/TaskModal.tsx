@@ -38,7 +38,7 @@ export default function TaskModal({
   isOpen,
   task,
   allTasks,
-  users = [], // 👈 ป้องกัน undefined ที่นี่
+  users = [],
   currentUser,
   canEdit = true,
   onClose,
@@ -72,12 +72,12 @@ export default function TaskModal({
 
   // suggestions ของ assignee (จาก profiles)
   const assigneeSuggestions = useMemo(() => {
-    const list = users || []; // กันเหนียวอีกรอบ
+    const list = users || [];
     const names = new Set<string>();
 
     list.forEach((u) => {
       if (u.display_name) names.add(u.display_name);
-      // ถ้าอยากใช้ email ด้วยก็ใส่เพิ่ม
+      // ถ้าอยากใช้ email ด้วยก็ใส่เพิ่มได้
       // if (u.email) names.add(u.email);
     });
 
@@ -93,7 +93,7 @@ export default function TaskModal({
     return `${y}-${m}-${day}`;
   };
 
-  // เมื่อเปิด modal โหลดค่าจาก task เดิม
+  // เมื่อเปิด modal โหลดค่าจาก task เดิม หรือเตรียมค่าตั้งต้นตอนสร้างใหม่
   useEffect(() => {
     if (!isOpen) return;
 
@@ -127,7 +127,10 @@ export default function TaskModal({
       setStatus('To Do');
       setPriority('Medium');
       setProgress(0);
-      setAssignee(null);
+
+      // ✅ Assignee default = current login account
+      setAssignee(currentUser?.display_name ?? null);
+
       setParentId(null);
       setIsRecurring(false);
       setRecurringType('none');
@@ -136,7 +139,7 @@ export default function TaskModal({
       setDependencies('');
       setWorkType('');
     }
-  }, [isOpen, task]);
+  }, [isOpen, task, currentUser]);
 
   if (!isOpen) return null;
 
@@ -147,10 +150,7 @@ export default function TaskModal({
 
     setStatus((prev) => {
       // ถ้า status = Blocked หรือ Need Help → ให้ user control เอง ไม่ auto เปลี่ยน
-      if (
-        prev === 'Blocked' ||
-        prev === 'In problem Need Help'
-      ) {
+      if (prev === 'Blocked' || prev === 'In problem Need Help') {
         return prev;
       }
 
@@ -187,8 +187,22 @@ export default function TaskModal({
       onClose();
       return;
     }
+
+    // ===== Required fields validation =====
     if (!name.trim()) {
       alert('Please enter a task name.');
+      return;
+    }
+    if (!startDate) {
+      alert('Please select a start date.');
+      return;
+    }
+    if (!workType) {
+      alert('Please select a work type.');
+      return;
+    }
+    if (!assignee) {
+      alert('Please choose an assignee.');
       return;
     }
 
@@ -217,6 +231,10 @@ export default function TaskModal({
     if (!confirm('Delete this task?')) return;
     onDelete(task.id);
   };
+
+  const RequiredMark = () => (
+    <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
+  );
 
   return (
     <div className="modal-backdrop">
@@ -248,7 +266,10 @@ export default function TaskModal({
           <div className="modal-form-grid-2">
             {/* Left column */}
             <div>
-              <div className="field-label">Task name</div>
+              <div className="field-label">
+                Task name
+                <RequiredMark />
+              </div>
               <input
                 className="input"
                 value={name}
@@ -262,9 +283,7 @@ export default function TaskModal({
                 <textarea
                   className="textarea"
                   value={description}
-                  onChange={(e) =>
-                    setDescription(e.target.value)
-                  }
+                  onChange={(e) => setDescription(e.target.value)}
                   placeholder="Add context, notes, links…"
                   disabled={disabled}
                 />
@@ -274,6 +293,7 @@ export default function TaskModal({
                 <div className="field-label">Scheduling</div>
                 <div className="field-label-small">
                   Start date
+                  <RequiredMark />
                 </div>
                 <input
                   type="date"
@@ -303,14 +323,16 @@ export default function TaskModal({
 
               {/* Work type */}
               <div style={{ marginTop: 14 }}>
-                <div className="field-label">ประเภทงาน</div>
+                <div className="field-label">
+                  ประเภทงาน
+                  <RequiredMark />
+                </div>
                 <select
                   className="select"
                   value={workType || ''}
                   onChange={(e) =>
                     setWorkType(
-                      (e.target.value ||
-                        '') as WorkType | '',
+                      (e.target.value || '') as WorkType | '',
                     )
                   }
                   disabled={disabled}
@@ -374,8 +396,7 @@ export default function TaskModal({
                     value={priority}
                     onChange={(e) =>
                       setPriority(
-                        e.target
-                          .value as Task['priority'],
+                        e.target.value as Task['priority'],
                       )
                     }
                     disabled={disabled}
@@ -414,7 +435,10 @@ export default function TaskModal({
 
               {/* Assignee with autocomplete */}
               <div style={{ marginTop: 12 }}>
-                <div className="field-label">Assignee</div>
+                <div className="field-label">
+                  Assignee
+                  <RequiredMark />
+                </div>
                 <input
                   className="input"
                   list="assignee-options"
@@ -453,8 +477,9 @@ export default function TaskModal({
                 </select>
               </div>
 
-              {/* Recurring (ตอนนี้อาจไม่ได้ใช้ แต่ผมยังไม่ยุ่ง) */}
-              {/*<div style={{ marginTop: 12 }}>
+              {/* Recurring (ตอนนี้อาจไม่ได้ใช้ แต่เก็บโค้ดไว้) */}
+              {/*
+              <div style={{ marginTop: 12 }}>
                 <div className="field-label">Recurring</div>
                 <button
                   type="button"
@@ -517,7 +542,8 @@ export default function TaskModal({
                     </select>
                   </div>
                 )}
-              </div>*/}
+              </div>
+              */}
 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">

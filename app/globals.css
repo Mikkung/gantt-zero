@@ -394,7 +394,7 @@ body.app-body {
   border-right: none;
   background: #f8fafc;
   padding: 58 10px; /**/
-  overflow-y: auto;
+  overflow-y: hidden;
   overflow-x: hidden;
   font-size: 13px;
 }
@@ -418,7 +418,7 @@ body.app-body {
   position: relative;
   border-radius: 12px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   border: 1px solid #e2e8f0;
   background: #ffffff;
 }
@@ -749,4 +749,12 @@ body.app-body {
   fill: rgba(239, 68, 68, 0.08) !important; /* red-500 เบาๆ */
   stroke: rgba(239, 68, 68, 0.4) !important;
   stroke-width: 1px !important;
+}
+
+
+/* ซ่อน bar สำหรับแถวที่เป็นหัวข้อ User / Category ใน Gantt */
+.gantt .bar.row-user-header rect,
+.gantt .bar.row-category-header rect {
+  opacity: 0;
+  pointer-events: none;
 }
