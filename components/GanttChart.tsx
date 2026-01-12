@@ -86,8 +86,8 @@ type TreeRow =
 const WORK_TYPES: { value: string; label: string }[] = [
   { value: 'routine', label: 'งานประจำ' },
   { value: 'strategic', label: 'งานยุทธศาสตร์' },
-  { value: 'process', label: 'งานพัฒนากระบวนการ' },
-  { value: 'self', label: 'งานพัฒนาตนเอง' },
+  { value: 'process_improvement', label: 'งานพัฒนากระบวนการ' },
+  { value: 'self_development', label: 'งานพัฒนาตนเอง' },
   { value: 'other', label: 'งานอื่นๆ' },
 ];
 
