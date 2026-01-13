@@ -78,11 +78,45 @@ export default function TaskModal({
     list.forEach((u) => {
       if (u.display_name) names.add(u.display_name);
       // ถ้าอยากใช้ email ด้วยก็ใส่เพิ่มได้
-      // if (u.email) names.add(u.email);
+      // const anyUser = u as any;
+      // if (anyUser.email) names.add(anyUser.email);
     });
 
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [users]);
+
+  // --- Parent task candidates: เฉพาะ task ที่ "เป็นของตัวเอง" ---
+  const parentCandidates = useMemo(() => {
+    // ตัด task ตัวที่กำลังแก้อยู่ (ไม่ให้เลือกตัวเองเป็น parent)
+    let base = allTasks.filter((t) => !task || t.id !== task.id);
+
+    if (!currentUser) return base;
+
+    // ชื่อ/อีเมลของตัวเอง เอาไว้เทียบกับ assignee
+    const selfNames = new Set<string>();
+    if (currentUser.display_name) selfNames.add(currentUser.display_name);
+    const anyUser = currentUser as any;
+    if (anyUser.email) selfNames.add(anyUser.email);
+
+    return base.filter((t) => {
+      const anyTask = t as any;
+
+      // ถ้ามีฟิลด์ระบุเจ้าของ เช่น created_by / owner_id / user_id → ใช้ก่อน
+      const createdBy =
+        anyTask.created_by || anyTask.owner_id || anyTask.user_id;
+
+      if (createdBy && createdBy === currentUser.id) {
+        return true;
+      }
+
+      // ถ้าไม่มีฟิลด์เจ้าของ → fallback มาใช้ assignee
+      if (t.assignee && selfNames.has(t.assignee)) {
+        return true;
+      }
+
+      return false;
+    });
+  }, [allTasks, task, currentUser]);
 
   // helper: สร้าง string วันที่แบบ yyyy-mm-dd ด้วย local time (กัน timezone เพี้ยน)
   const getTodayString = () => {
@@ -456,6 +490,7 @@ export default function TaskModal({
                 </datalist>
               </div>
 
+              {/* Parent task: แสดงเฉพาะ task ของตัวเอง */}
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Parent task</div>
                 <select
@@ -467,81 +502,19 @@ export default function TaskModal({
                   disabled={disabled}
                 >
                   <option value="">No parent</option>
-                  {allTasks
-                    .filter((t) => !task || t.id !== task.id)
-                    .map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
+                  {parentCandidates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               {/* Recurring (ตอนนี้อาจไม่ได้ใช้ แต่เก็บโค้ดไว้) */}
-              {/*
+              {/* 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Recurring</div>
-                <button
-                  type="button"
-                  className={
-                    isRecurring
-                      ? 'recurring-toggle recurring-on'
-                      : 'recurring-toggle'
-                  }
-                  onClick={() =>
-                    !disabled &&
-                    setIsRecurring((v) => !v)
-                  }
-                >
-                  <span>
-                    {isRecurring
-                      ? 'Repeats'
-                      : 'Does not repeat'}
-                  </span>
-                  <span>
-                    {isRecurring ? 'Disable' : 'Enable'}
-                  </span>
-                </button>
-
-                {isRecurring && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      display: 'flex',
-                      gap: 8,
-                    }}
-                  >
-                    <input
-                      type="number"
-                      className="input"
-                      style={{ width: 70 }}
-                      min={1}
-                      value={recurringInterval ?? 1}
-                      onChange={(e) =>
-                        setRecurringInterval(
-                          Number(e.target.value) || 1,
-                        )
-                      }
-                      disabled={disabled}
-                    />
-                    <select
-                      className="select"
-                      value={recurringUnit ?? 'month'}
-                      onChange={(e) =>
-                        setRecurringUnit(
-                          e.target
-                            .value as Task['recurring_unit'],
-                        )
-                      }
-                      disabled={disabled}
-                    >
-                      <option value="day">day(s)</option>
-                      <option value="week">week(s)</option>
-                      <option value="month">month(s)</option>
-                      <option value="year">year(s)</option>
-                    </select>
-                  </div>
-                )}
+                ...
               </div>
               */}
 
@@ -623,3 +596,4 @@ export default function TaskModal({
     </div>
   );
 }
+
