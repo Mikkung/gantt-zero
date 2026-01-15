@@ -32,6 +32,9 @@ interface TaskModalProps {
   onClose: () => void;
   onSave: (partial: Partial<Task>) => void;
   onDelete: (id: string) => void;
+
+  // 👇 ใหม่: ฟังก์ชันสำหรับ duplicate task
+  onDuplicate?: (task: Task) => void;
 }
 
 export default function TaskModal({
@@ -44,6 +47,7 @@ export default function TaskModal({
   onClose,
   onSave,
   onDelete,
+  onDuplicate,
 }: TaskModalProps) {
   const isEdit = !!task;
   const disabled = !canEdit;
@@ -78,45 +82,11 @@ export default function TaskModal({
     list.forEach((u) => {
       if (u.display_name) names.add(u.display_name);
       // ถ้าอยากใช้ email ด้วยก็ใส่เพิ่มได้
-      // const anyUser = u as any;
-      // if (anyUser.email) names.add(anyUser.email);
+      // if (u.email) names.add(u.email);
     });
 
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [users]);
-
-  // --- Parent task candidates: เฉพาะ task ที่ "เป็นของตัวเอง" ---
-  const parentCandidates = useMemo(() => {
-    // ตัด task ตัวที่กำลังแก้อยู่ (ไม่ให้เลือกตัวเองเป็น parent)
-    let base = allTasks.filter((t) => !task || t.id !== task.id);
-
-    if (!currentUser) return base;
-
-    // ชื่อ/อีเมลของตัวเอง เอาไว้เทียบกับ assignee
-    const selfNames = new Set<string>();
-    if (currentUser.display_name) selfNames.add(currentUser.display_name);
-    const anyUser = currentUser as any;
-    if (anyUser.email) selfNames.add(anyUser.email);
-
-    return base.filter((t) => {
-      const anyTask = t as any;
-
-      // ถ้ามีฟิลด์ระบุเจ้าของ เช่น created_by / owner_id / user_id → ใช้ก่อน
-      const createdBy =
-        anyTask.created_by || anyTask.owner_id || anyTask.user_id;
-
-      if (createdBy && createdBy === currentUser.id) {
-        return true;
-      }
-
-      // ถ้าไม่มีฟิลด์เจ้าของ → fallback มาใช้ assignee
-      if (t.assignee && selfNames.has(t.assignee)) {
-        return true;
-      }
-
-      return false;
-    });
-  }, [allTasks, task, currentUser]);
 
   // helper: สร้าง string วันที่แบบ yyyy-mm-dd ด้วย local time (กัน timezone เพี้ยน)
   const getTodayString = () => {
@@ -264,6 +234,13 @@ export default function TaskModal({
     if (!task || !task.id || !canEdit) return;
     if (!confirm('Delete this task?')) return;
     onDelete(task.id);
+  };
+
+  // 👇 ใหม่: กด Duplicate
+  const handleDuplicateClick = () => {
+    if (!task || !canEdit) return;
+    if (!onDuplicate) return;
+    onDuplicate(task);
   };
 
   const RequiredMark = () => (
@@ -414,7 +391,6 @@ export default function TaskModal({
                       In Progress
                     </option>
                     <option value="Blocked">Blocked</option>
-                    {/* ✅ status ใหม่ */}
                     <option value="In problem Need Help">
                       In problem – Need Help
                     </option>
@@ -490,7 +466,6 @@ export default function TaskModal({
                 </datalist>
               </div>
 
-              {/* Parent task: แสดงเฉพาะ task ของตัวเอง */}
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Parent task</div>
                 <select
@@ -502,21 +477,20 @@ export default function TaskModal({
                   disabled={disabled}
                 >
                   <option value="">No parent</option>
-                  {parentCandidates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
+                  {allTasks
+                    .filter((t) => !task || t.id !== task.id)
+                    // 👇 ถ้ามี currentUser: แสดงเฉพาะที่ assignee ตรงกัน
+                    .filter((t) => {
+                      if (!currentUser?.display_name) return true;
+                      return t.assignee === currentUser.display_name;
+                    })
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
                 </select>
               </div>
-
-              {/* Recurring (ตอนนี้อาจไม่ได้ใช้ แต่เก็บโค้ดไว้) */}
-              {/* 
-              <div style={{ marginTop: 12 }}>
-                <div className="field-label">Recurring</div>
-                ...
-              </div>
-              */}
 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">
@@ -540,15 +514,28 @@ export default function TaskModal({
 
         {/* footer */}
         <div className="modal-footer">
-          <div>
+          <div style={{ display: 'flex', gap: 8 }}>
             {isEdit && canEdit && (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={handleDeleteClick}
-              >
-                Delete
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={handleDeleteClick}
+                >
+                  Delete
+                </button>
+
+                {/* 👇 ปุ่ม Duplicate ใหม่ */}
+                {onDuplicate && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleDuplicateClick}
+                  >
+                    Duplicate
+                  </button>
+                )}
+              </>
             )}
           </div>
 
@@ -596,4 +583,3 @@ export default function TaskModal({
     </div>
   );
 }
-
