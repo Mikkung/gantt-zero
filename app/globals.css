@@ -449,6 +449,27 @@ body.app-body {
   margin-top: 2px;
 }
 
+/* To Do */
+.gantt .bar-wrapper.status-todo .bar-progress {
+  fill: #e5e7eb;
+}
+
+/* In Progress */
+.gantt .bar-wrapper.status-inprogress .bar-progress {
+  fill: #f7d448
+;
+}
+
+/* Done */
+.gantt .bar-wrapper.status-done .bar-progress {
+  fill: #5ada9e;
+}
+
+/* In Problem */
+.gantt .bar-wrapper.status-inproblemneedhelp .bar-progress {
+  fill: #eb5858;
+}
+
 /* ------------ Modal, form, profile, login (ของเดิม) ------------ */
 /* (ยกมาทั้งก้อนของคุณต่อเลย – ผมจะไม่ซ้ำ @apply ซ้ำด้านล่างให้แล้ว) */
 
@@ -757,4 +778,12 @@ body.app-body {
 .gantt .bar.row-category-header rect {
   opacity: 0;
   pointer-events: none;
+}
+
+/* ถ้า frappe-gantt วาด rect ชื่อ today-highlight */
+.gantt-wrapper .today-highlight {
+  fill: transparent;
+  stroke: #ef4444;
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
 }
