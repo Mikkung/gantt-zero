@@ -250,15 +250,14 @@ export default function HomePage() {
   const leafTasks = useMemo(() => {
     const parentIds = new Set(
       fullyFilteredTasks
-        .filter((t) => t.parent_id)         // แถวที่เป็นลูก
-        .map((t) => t.parent_id as string)  // id ของ parent
+        .filter((t) => t.parent_id) // แถวที่เป็นลูก
+        .map((t) => t.parent_id as string), // id ของ parent
     );
 
     return fullyFilteredTasks.filter(
-      (t) => !parentIds.has(t.id)           // เอาเฉพาะตัวที่ไม่มีใครอ้างเป็น parent
+      (t) => !parentIds.has(t.id), // เอาเฉพาะตัวที่ไม่มีใครอ้างเป็น parent
     );
   }, [fullyFilteredTasks]);
-
 
   const summary = useMemo(() => {
     const total = fullyFilteredTasks.length;
@@ -267,12 +266,12 @@ export default function HomePage() {
     ).length;
 
     const done = fullyFilteredTasks.filter((t) => t.status === 'Done').length;
-    
-    const now = new Date();  
+
+    const now = new Date();
     const todayStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
     );
 
     const overdue = fullyFilteredTasks.filter((t) => {
@@ -280,7 +279,7 @@ export default function HomePage() {
       const end = new Date(t.end_date);
       return end < now && t.status !== 'Done';
     }).length;
-    
+
     return { total, inProgress, done, overdue };
   }, [fullyFilteredTasks]);
 
@@ -313,7 +312,7 @@ export default function HomePage() {
         return;
       }
 
-      // assignee: ต้องเป็น uuid หรือ null เท่านั้น
+      // assignee: ต้องเป็น uuid หรือ null เท่านั้น (ตอนนี้ใช้เป็น string ก็เซฟตรง ๆ ได้)
       const normalizedAssignee =
         partial.assignee === '' || partial.assignee == null
           ? null
@@ -374,9 +373,7 @@ export default function HomePage() {
           parent_id: partial.parent_id ?? null,
         };
 
-        // ถ้าตารางมีคอลัมน์ task_type (routine / strategic / process / self / other)
-        // ให้ใช้ค่า default เป็น 'routine'
-        // ถ้าไม่มีคอลัมน์นี้ ให้ลบบรรทัดนี้ออก
+        // work_type (routine / strategic / process / self / other)
         (insertPayload as any).work_type =
           (partial as any).work_type ?? 'routine';
 
@@ -428,6 +425,60 @@ export default function HomePage() {
     } catch (err) {
       console.error('handleDeleteTask unexpected error:', err);
       alert('Unexpected error when deleting task.');
+    }
+  };
+
+  // 👇 ใหม่: duplicate task จาก task เดิม
+  const handleDuplicateTask = async (task: Task) => {
+    try {
+      if (!canEditTasks) return;
+
+      const insertPayload: any = {
+        name: `${task.name} (copy)`,
+        description: task.description ?? '',
+        start_date: task.start_date ?? null,
+        end_date: task.end_date ?? null,
+
+        // reset สถานะให้เป็นงานใหม่
+        status: 'To Do',
+        priority: task.priority ?? 'Medium',
+        progress: 0,
+
+        assignee: task.assignee ?? null,
+
+        is_recurring: task.is_recurring ?? false,
+        recurring_type: task.is_recurring ? task.recurring_type ?? 'none' : 'none',
+        recurring_interval: task.is_recurring ? task.recurring_interval ?? 1 : null,
+        recurring_unit: task.is_recurring ? task.recurring_unit ?? 'month' : null,
+
+        dependencies: task.dependencies ?? '',
+
+        team_id: task.team_id ?? currentProfile?.team_id ?? null,
+        parent_id: task.parent_id ?? null,
+
+        work_type: (task as any).work_type ?? 'routine',
+      };
+
+      const { error } = await supabase.from('tasks').insert(insertPayload);
+
+      if (error) {
+        console.error('Supabase DUPLICATE error:', {
+          message: error.message,
+          details: (error as any).details,
+          hint: (error as any).hint,
+        });
+        alert(
+          'Cannot duplicate task: ' +
+            (error.message || JSON.stringify(error)),
+        );
+        return;
+      }
+
+      setIsModalOpen(false); // ถ้าอยากให้ modal ยังเปิดอยู่ก็ลบบรรทัดนี้ได้
+      await loadTasks();
+    } catch (err) {
+      console.error('handleDuplicateTask unexpected error:', err);
+      alert('Unexpected error when duplicating task.');
     }
   };
 
@@ -669,7 +720,6 @@ export default function HomePage() {
       activeAssignee={filterAssignee}
       onSelectTeam={setFilterTeamId}
       onSelectAssignee={setFilterAssignee}
-
       onFilterMyTasks={() => {
         if (!currentProfile) return;
         const found = users.find((u) => u.id === currentProfile.id);
@@ -679,14 +729,16 @@ export default function HomePage() {
           prev === found.display_name ? null : found.display_name,
         );
       }}
-
-      onFilterThisWeek={() => 
-        setFilterDateRange((prev) => (prev === 'thisWeek' ? 'all' : 'thisWeek'))
+      onFilterThisWeek={() =>
+        setFilterDateRange((prev) =>
+          prev === 'thisWeek' ? 'all' : 'thisWeek',
+        )
       }
-      onFilterOverdue={() => 
-         setFilterDateRange((prev) => (prev === 'overdue' ? 'all' : 'overdue'))
+      onFilterOverdue={() =>
+        setFilterDateRange((prev) =>
+          prev === 'overdue' ? 'all' : 'overdue',
+        )
       }
-      
       currentProfile={currentProfile}
       onSignIn={handleSignIn}
       onSignOut={handleSignOut}
@@ -774,6 +826,7 @@ export default function HomePage() {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveTask}
         onDelete={handleDeleteTask}
+        onDuplicate={handleDuplicateTask}  
       />
     </AppShell>
   );
