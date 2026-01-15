@@ -86,8 +86,8 @@ type TreeRow =
 const WORK_TYPES: { value: string; label: string }[] = [
   { value: 'routine', label: 'งานประจำ' },
   { value: 'strategic', label: 'งานยุทธศาสตร์' },
-  { value: 'process_improvement', label: 'งานพัฒนากระบวนการ' },
-  { value: 'self_development', label: 'งานพัฒนาตนเอง' },
+  { value: 'process', label: 'งานพัฒนากระบวนการ' },
+  { value: 'self', label: 'งานพัฒนาตนเอง' },
   { value: 'other', label: 'งานอื่นๆ' },
 ];
 
@@ -110,6 +110,9 @@ export default function GanttChart({
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(
     () => new Set(),
   );
+
+  // ใช้จำว่าเรา set default collapse ไปแล้วหรือยัง (กันทำซ้ำ)
+  const initialCollapseAppliedRef = useRef(false);
 
   // filter ประเภทงาน (ค่าเริ่มต้น = แสดงทุกประเภท)
   const [workTypeFilter, setWorkTypeFilter] = useState<string[]>(() =>
@@ -279,6 +282,25 @@ export default function GanttChart({
 
     return rows;
   }, [dateFilteredTasks, collapsedParents, workTypeFilter]);
+
+  // ---------- NEW: default collapse category rows on first load ----------
+  useEffect(() => {
+    if (initialCollapseAppliedRef.current) return;
+    if (!treeRows.length) return;
+
+    initialCollapseAppliedRef.current = true;
+
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      for (const row of treeRows) {
+        if (row.kind === 'category') {
+          next.add(row.id); // collapse ทุก category ตอนเริ่มต้น
+        }
+      }
+      return next;
+    });
+  }, [treeRows]);
+  // -----------------------------------------------------------------------
 
   // 3) สร้าง / อัปเดต Gantt
   useEffect(() => {
@@ -612,14 +634,14 @@ export default function GanttChart({
             <div className="gantt-legend-item">
               <span
                 className="gantt-legend-color"
-                style={{ backgroundColor: '#fb923c' }}
+                style={{ backgroundColor: '#f7d448' }}
               />
               <span>In Progress</span>
             </div>
             <div className="gantt-legend-item">
               <span
                 className="gantt-legend-color"
-                style={{ backgroundColor: '#22c55e' }}
+                style={{ backgroundColor: '#5ada9e' }}
               />
               <span>Done</span>
             </div>
