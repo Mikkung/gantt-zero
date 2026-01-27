@@ -127,21 +127,25 @@ export default function GanttChart({
   useEffect(() => {
     const today = new Date();
     const from = new Date(today);
-    from.setDate(from.getDate() - 7);
+    from.setDate(from.getDate() - 60);
 
     const to = new Date(today);
-    to.setDate(to.getDate() + 90);
+    to.setDate(to.getDate() + 60);
 
     setViewFrom(formatInputDate(from));
     setViewTo(formatInputDate(to));
   }, []);
 
   // 1) filter งานตามช่วงวันที่
+  //const dateFilteredTasks = useMemo(() => {
+  //  return (tasks || []).filter((t) =>
+  //    rangesIntersect(t.start_date, t.end_date, viewFrom, viewTo),
+  //  );
+  //}, [tasks, viewFrom, viewTo]);
+  
   const dateFilteredTasks = useMemo(() => {
-    return (tasks || []).filter((t) =>
-      rangesIntersect(t.start_date, t.end_date, viewFrom, viewTo),
-    );
-  }, [tasks, viewFrom, viewTo]);
+    return tasks || [];
+  }, [tasks]);
 
   // map สำหรับหา Task จาก id ได้เร็ว ๆ (ใช้ใน popup / update)
   const taskById = useMemo(() => {
