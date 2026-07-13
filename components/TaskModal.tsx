@@ -31,11 +31,8 @@ interface TaskModalProps {
   onClose: () => void;
   onSave: (partial: Partial<Task>) => void;
   onDelete: (id: string) => void;
-<<<<<<< HEAD
 
   // 👇 ใหม่: ฟังก์ชันสำหรับ duplicate task
-=======
->>>>>>> a963876 (upddated maintenance function)
   onDuplicate?: (task: Task) => void;
 }
 
@@ -242,10 +239,7 @@ export default function TaskModal({
     onDelete(task.id);
   };
 
-<<<<<<< HEAD
   // 👇 ใหม่: กด Duplicate
-=======
->>>>>>> a963876 (upddated maintenance function)
   const handleDuplicateClick = () => {
     if (!task || !canEdit) return;
     if (!onDuplicate) return;
@@ -519,10 +513,7 @@ export default function TaskModal({
                   <option value="">No parent</option>
                   {allTasks
                     .filter((t) => !task || t.id !== task.id)
-<<<<<<< HEAD
                     // 👇 ถ้ามี currentUser: แสดงเฉพาะที่ assignee ตรงกัน
-=======
->>>>>>> a963876 (upddated maintenance function)
                     .filter((t) => {
                       if (!currentUser?.display_name) return true;
                       return t.assignee === currentUser.display_name;
@@ -536,13 +527,9 @@ export default function TaskModal({
               </div>
 
               <div style={{ marginTop: 12 }}>
-<<<<<<< HEAD
                 <div className="field-label">
                   Dependencies (comma separated IDs)
                 </div>
-=======
-                <div className="field-label">Dependencies (comma separated IDs)</div>
->>>>>>> a963876 (upddated maintenance function)
                 <input
                   className="input"
                   value={dependencies ?? ''}
@@ -568,10 +555,7 @@ export default function TaskModal({
                   Delete
                 </button>
 
-<<<<<<< HEAD
                 {/* 👇 ปุ่ม Duplicate ใหม่ */}
-=======
->>>>>>> a963876 (upddated maintenance function)
                 {onDuplicate && (
                   <button
                     type="button"

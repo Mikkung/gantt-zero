@@ -199,15 +199,10 @@ export default function GanttChart({
     () => new Set(),
   );
 
-<<<<<<< HEAD
   // ใช้จำว่าเรา set default collapse ไปแล้วหรือยัง (กันทำซ้ำ)
   const initialCollapseAppliedRef = useRef(false);
 
   // filter ประเภทงาน (ค่าเริ่มต้น = แสดงทุกประเภท)
-=======
-  const initialCollapseAppliedRef = useRef(false);
-
->>>>>>> a963876 (upddated maintenance function)
   const [workTypeFilter, setWorkTypeFilter] = useState<string[]>(() =>
     WORK_TYPES.map((w) => w.value),
   );
@@ -227,23 +222,15 @@ export default function GanttChart({
     setViewTo(formatInputDate(to));
   }, []);
 
-<<<<<<< HEAD
   // 1) filter งานตามช่วงวันที่
   //const dateFilteredTasks = useMemo(() => {
   //  return (tasks || []).filter((t) =>
   //    rangesIntersect(t.start_date, t.end_date, viewFrom, viewTo),
   //  );
   //}, [tasks, viewFrom, viewTo]);
-  
+
   const dateFilteredTasks = useMemo(() => {
     return tasks || [];
-=======
-  const dateFilteredTasks = useMemo(() => {
-    return tasks || [];
-    // return (tasks || []).filter((t) =>
-    //   rangesIntersect(t.start_date, t.end_date, viewFrom, viewTo),
-    // );
->>>>>>> a963876 (upddated maintenance function)
   }, [tasks]);
 
   const taskById = useMemo(() => {
@@ -382,10 +369,7 @@ export default function GanttChart({
     return rows;
   }, [dateFilteredTasks, collapsedParents, workTypeFilter]);
 
-<<<<<<< HEAD
   // ---------- NEW: default collapse category rows on first load ----------
-=======
->>>>>>> a963876 (upddated maintenance function)
   useEffect(() => {
     if (initialCollapseAppliedRef.current) return;
     if (!treeRows.length) return;
@@ -396,21 +380,13 @@ export default function GanttChart({
       const next = new Set(prev);
       for (const row of treeRows) {
         if (row.kind === 'category') {
-<<<<<<< HEAD
           next.add(row.id); // collapse ทุก category ตอนเริ่มต้น
-=======
-          next.add(row.id);
->>>>>>> a963876 (upddated maintenance function)
         }
       }
       return next;
     });
   }, [treeRows]);
-<<<<<<< HEAD
   // -----------------------------------------------------------------------
-
-  // 3) สร้าง / อัปเดต Gantt
-=======
 
   const rowSpanById = useMemo(() => {
     const rowSpans: Record<string, DateSpan> = {};
@@ -494,7 +470,7 @@ export default function GanttChart({
     });
   };
 
->>>>>>> a963876 (upddated maintenance function)
+  // 3) สร้าง / อัปเดต Gantt
   useEffect(() => {
     if (!ganttRef.current || treeRows.length === 0) {
       if (ganttRef.current) ganttRef.current.innerHTML = '';
