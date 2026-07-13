@@ -25,6 +25,9 @@ export interface Profile {
   avatar_url?: string | null;
 }
 
+
+export type TaskFrequencyUnit = "month" | "year";
+
 export interface Task {
   id: string;
   name: string;
@@ -44,4 +47,9 @@ export interface Task {
   description?: string | null;
 
   work_type?: WorkType | null;
+
+  output?: string | null;
+  frequency_count?: number | null;
+  frequency_unit?: TaskFrequencyUnit| null;
+  time_per_occurrence_minutes?: number | null;
 }

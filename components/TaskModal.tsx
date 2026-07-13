@@ -25,15 +25,17 @@ interface TaskModalProps {
   task: Task | null;
   allTasks: Task[];
 
-  // ทำเป็น optional แล้วให้ default เป็น [] ในตัว component
   users?: Profile[];
   currentUser?: Profile | null;
-  canEdit?: boolean; // ถ้า false = view only
+  canEdit?: boolean;
   onClose: () => void;
   onSave: (partial: Partial<Task>) => void;
   onDelete: (id: string) => void;
+<<<<<<< HEAD
 
   // 👇 ใหม่: ฟังก์ชันสำหรับ duplicate task
+=======
+>>>>>>> a963876 (upddated maintenance function)
   onDuplicate?: (task: Task) => void;
 }
 
@@ -74,21 +76,23 @@ export default function TaskModal({
   // ประเภทงาน
   const [workType, setWorkType] = useState<WorkType | ''>('');
 
-  // suggestions ของ assignee (จาก profiles)
+  // เพิ่ม ผลผลิต / ความถี่ / เวลาที่ใช้
+  const [output, setOutput] = useState('');
+  const [frequencyCount, setFrequencyCount] = useState<number | ''>('');
+  const [frequencyUnit, setFrequencyUnit] = useState<'month' | 'year'>('month');
+  const [timePerOccurrenceMinutes, setTimePerOccurrenceMinutes] = useState<number | ''>('');
+
   const assigneeSuggestions = useMemo(() => {
     const list = users || [];
     const names = new Set<string>();
 
     list.forEach((u) => {
       if (u.display_name) names.add(u.display_name);
-      // ถ้าอยากใช้ email ด้วยก็ใส่เพิ่มได้
-      // if (u.email) names.add(u.email);
     });
 
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [users]);
 
-  // helper: สร้าง string วันที่แบบ yyyy-mm-dd ด้วย local time (กัน timezone เพี้ยน)
   const getTodayString = () => {
     const d = new Date();
     const y = d.getFullYear();
@@ -97,7 +101,6 @@ export default function TaskModal({
     return `${y}-${m}-${day}`;
   };
 
-  // เมื่อเปิด modal โหลดค่าจาก task เดิม หรือเตรียมค่าตั้งต้นตอนสร้างใหม่
   useEffect(() => {
     if (!isOpen) return;
 
@@ -118,12 +121,17 @@ export default function TaskModal({
       setRecurringUnit(task.recurring_unit ?? 'month');
       setDependencies(task.dependencies ?? '');
       setWorkType((task.work_type as WorkType | null) ?? '');
+
+      // เพิ่มผลผลิต / จำนวนครั้ง / เวลาที่ใช้
+      setOutput(task.output ?? '');
+      setFrequencyCount(task.frequency_count ?? '');
+      setFrequencyUnit(task.frequency_unit ?? 'month');
+      setTimePerOccurrenceMinutes(task.time_per_occurrence_minutes ?? '');
     } else {
-      // ----- Create mode: reset + default -----
+      // ----- Create mode -----
       setName('');
       setDescription('');
 
-      // ✅ Start date default = วันนี้
       const today = getTodayString();
       setStartDate(today);
 
@@ -131,10 +139,7 @@ export default function TaskModal({
       setStatus('To Do');
       setPriority('Medium');
       setProgress(0);
-
-      // ✅ Assignee default = current login account
       setAssignee(currentUser?.display_name ?? null);
-
       setParentId(null);
       setIsRecurring(false);
       setRecurringType('none');
@@ -142,29 +147,27 @@ export default function TaskModal({
       setRecurringUnit('month');
       setDependencies('');
       setWorkType('');
+
+      // reset ช่องใหม่
+      setOutput('');
+      setFrequencyCount('');
+      setFrequencyUnit('month');
+      setTimePerOccurrenceMinutes('');
     }
   }, [isOpen, task, currentUser]);
 
   if (!isOpen) return null;
 
-  // ===== Logic: ผูก Progress ↔ Status =====
-
   const handleProgressChange = (value: number) => {
     setProgress(value);
 
     setStatus((prev) => {
-      // ถ้า status = Blocked หรือ Need Help → ให้ user control เอง ไม่ auto เปลี่ยน
       if (prev === 'Blocked' || prev === 'In problem Need Help') {
         return prev;
       }
 
-      if (value === 0) {
-        return 'To Do';
-      }
-      if (value === 100) {
-        return 'Done';
-      }
-      // 0 < progress < 100
+      if (value === 0) return 'To Do';
+      if (value === 100) return 'Done';
       return 'In Progress';
     });
   };
@@ -173,18 +176,16 @@ export default function TaskModal({
     setStatus(newStatus);
 
     setProgress((prev) => {
-      if (newStatus === 'Done') {
-        // ✅ ถ้าเลือก Done → progress = 100
-        return 100;
-      }
-      if (newStatus === 'To Do') {
-        // ✅ ถ้าเลือก To Do → progress = 0
-        return 0;
-      }
-      // In Progress / Blocked / In problem Need Help ไม่บังคับ progress
+      if (newStatus === 'Done') return 100;
+      if (newStatus === 'To Do') return 0;
       return prev;
     });
   };
+
+  const estimatedHours =
+    frequencyCount === '' || timePerOccurrenceMinutes === ''
+      ? null
+      : ((Number(frequencyCount) * Number(timePerOccurrenceMinutes)) / 60).toFixed(1);
 
   const handleSubmit = () => {
     if (!canEdit) {
@@ -192,7 +193,6 @@ export default function TaskModal({
       return;
     }
 
-    // ===== Required fields validation =====
     if (!name.trim()) {
       alert('Please enter a task name.');
       return;
@@ -226,7 +226,13 @@ export default function TaskModal({
       recurring_interval: isRecurring ? recurringInterval : null,
       recurring_unit: isRecurring ? recurringUnit : null,
       dependencies,
-      work_type: workType || null, // 👈 บันทึกประเภทงาน
+      work_type: workType || null,
+
+      output: output || '',
+      frequency_count: frequencyCount === '' ? null : Number(frequencyCount),
+      frequency_unit: frequencyUnit,
+      time_per_occurrence_minutes:
+        timePerOccurrenceMinutes === '' ? null : Number(timePerOccurrenceMinutes),
     });
   };
 
@@ -236,7 +242,10 @@ export default function TaskModal({
     onDelete(task.id);
   };
 
+<<<<<<< HEAD
   // 👇 ใหม่: กด Duplicate
+=======
+>>>>>>> a963876 (upddated maintenance function)
   const handleDuplicateClick = () => {
     if (!task || !canEdit) return;
     if (!onDuplicate) return;
@@ -249,10 +258,7 @@ export default function TaskModal({
 
   return (
     <div className="modal-backdrop">
-      <div
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="modal-header">
           <div>
@@ -263,11 +269,7 @@ export default function TaskModal({
               Keep details clear so your team can move fast.
             </div>
           </div>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={onClose}
-          >
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
             ×
           </button>
         </div>
@@ -310,24 +312,17 @@ export default function TaskModal({
                   type="date"
                   className="input"
                   value={startDate ?? ''}
-                  onChange={(e) =>
-                    setStartDate(e.target.value || null)
-                  }
+                  onChange={(e) => setStartDate(e.target.value || null)}
                   disabled={disabled}
                 />
-                <div
-                  className="field-label-small"
-                  style={{ marginTop: 6 }}
-                >
+                <div className="field-label-small" style={{ marginTop: 6 }}>
                   End date
                 </div>
                 <input
                   type="date"
                   className="input"
                   value={endDate ?? ''}
-                  onChange={(e) =>
-                    setEndDate(e.target.value || null)
-                  }
+                  onChange={(e) => setEndDate(e.target.value || null)}
                   disabled={disabled}
                 />
               </div>
@@ -342,54 +337,114 @@ export default function TaskModal({
                   className="select"
                   value={workType || ''}
                   onChange={(e) =>
-                    setWorkType(
-                      (e.target.value || '') as WorkType | '',
-                    )
+                    setWorkType((e.target.value || '') as WorkType | '')
                   }
                   disabled={disabled}
                 >
                   <option value="">(ไม่ระบุ)</option>
                   {WORK_TYPE_OPTIONS.map((opt) => (
-                    <option
-                      key={opt.value}
-                      value={opt.value}
-                    >
+                    <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
                   ))}
                 </select>
               </div>
+
+              {/* New fields */}
+              <div style={{ marginTop: 14 }}>
+                <div className="field-label">ผลผลิต</div>
+                <input
+                  className="input"
+                  value={output}
+                  onChange={(e) => setOutput(e.target.value)}
+                  placeholder="เช่น รายงานสรุป / Dashboard / เอกสาร"
+                  disabled={disabled}
+                />
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <div className="field-label">จำนวนครั้งของงาน</div>
+                <input
+                  type="number"
+                  className="input"
+                  value={frequencyCount}
+                  onChange={(e) =>
+                    setFrequencyCount(
+                      e.target.value === '' ? '' : Number(e.target.value)
+                    )
+                  }
+                  placeholder="เช่น 4"
+                  min={0}
+                  disabled={disabled}
+                />
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <div className="field-label">หน่วย</div>
+                <select
+                  className="select"
+                  value={frequencyUnit}
+                  onChange={(e) =>
+                    setFrequencyUnit(e.target.value as 'month' | 'year')
+                  }
+                  disabled={disabled}
+                >
+                  <option value="month">ต่อเดือน</option>
+                  <option value="year">ต่อปี</option>
+                </select>
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <div className="field-label">เวลาที่ใช้ต่อครั้ง (นาที)</div>
+                <input
+                  type="number"
+                  className="input"
+                  value={timePerOccurrenceMinutes}
+                  onChange={(e) =>
+                    setTimePerOccurrenceMinutes(
+                      e.target.value === '' ? '' : Number(e.target.value)
+                    )
+                  }
+                  placeholder="เช่น 90"
+                  min={0}
+                  disabled={disabled}
+                />
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <div className="field-label">ภาระงานรวมโดยประมาณ</div>
+                <div
+                  className="input"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    color: '#374151',
+                    background: '#f9fafb',
+                  }}
+                >
+                  {estimatedHours
+                    ? `${estimatedHours} ชั่วโมง/${frequencyUnit === 'year' ? 'ปี' : 'เดือน'}`
+                    : '-'}
+                </div>
+              </div>
             </div>
 
             {/* Right column */}
             <div>
-              <div className="field-label">
-                Status &amp; priority
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                }}
-              >
+              <div className="field-label">Status &amp; priority</div>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}>
-                  <div className="field-label-small">
-                    Status
-                  </div>
+                  <div className="field-label-small">Status</div>
                   <select
                     className="select"
                     value={status}
                     onChange={(e) =>
-                      handleStatusChange(
-                        e.target.value as Task['status'],
-                      )
+                      handleStatusChange(e.target.value as Task['status'])
                     }
                     disabled={disabled}
                   >
                     <option value="To Do">To Do</option>
-                    <option value="In Progress">
-                      In Progress
-                    </option>
+                    <option value="In Progress">In Progress</option>
                     <option value="Blocked">Blocked</option>
                     <option value="In problem Need Help">
                       In problem – Need Help
@@ -398,16 +453,12 @@ export default function TaskModal({
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div className="field-label-small">
-                    Priority
-                  </div>
+                  <div className="field-label-small">Priority</div>
                   <select
                     className="select"
                     value={priority}
                     onChange={(e) =>
-                      setPriority(
-                        e.target.value as Task['priority'],
-                      )
+                      setPriority(e.target.value as Task['priority'])
                     }
                     disabled={disabled}
                   >
@@ -418,10 +469,7 @@ export default function TaskModal({
                 </div>
               </div>
 
-              <div
-                style={{ marginTop: 12 }}
-                className="range-row"
-              >
+              <div style={{ marginTop: 12 }} className="range-row">
                 <div className="field-label">Tracking</div>
                 <div className="range-header">
                   <span>Progress</span>
@@ -434,16 +482,12 @@ export default function TaskModal({
                   max={100}
                   step={5}
                   value={progress}
-                  onChange={(e) =>
-                    handleProgressChange(
-                      Number(e.target.value),
-                    )
-                  }
+                  onChange={(e) => handleProgressChange(Number(e.target.value))}
                   disabled={disabled}
                 />
               </div>
 
-              {/* Assignee with autocomplete */}
+              {/* Assignee */}
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">
                   Assignee
@@ -453,9 +497,7 @@ export default function TaskModal({
                   className="input"
                   list="assignee-options"
                   value={assignee ?? ''}
-                  onChange={(e) =>
-                    setAssignee(e.target.value || null)
-                  }
+                  onChange={(e) => setAssignee(e.target.value || null)}
                   placeholder="Name or email"
                   disabled={disabled}
                 />
@@ -471,15 +513,16 @@ export default function TaskModal({
                 <select
                   className="select"
                   value={parentId ?? ''}
-                  onChange={(e) =>
-                    setParentId(e.target.value || null)
-                  }
+                  onChange={(e) => setParentId(e.target.value || null)}
                   disabled={disabled}
                 >
                   <option value="">No parent</option>
                   {allTasks
                     .filter((t) => !task || t.id !== task.id)
+<<<<<<< HEAD
                     // 👇 ถ้ามี currentUser: แสดงเฉพาะที่ assignee ตรงกัน
+=======
+>>>>>>> a963876 (upddated maintenance function)
                     .filter((t) => {
                       if (!currentUser?.display_name) return true;
                       return t.assignee === currentUser.display_name;
@@ -493,17 +536,17 @@ export default function TaskModal({
               </div>
 
               <div style={{ marginTop: 12 }}>
+<<<<<<< HEAD
                 <div className="field-label">
                   Dependencies (comma separated IDs)
                 </div>
+=======
+                <div className="field-label">Dependencies (comma separated IDs)</div>
+>>>>>>> a963876 (upddated maintenance function)
                 <input
                   className="input"
                   value={dependencies ?? ''}
-                  onChange={(e) =>
-                    setDependencies(
-                      e.target.value || null,
-                    )
-                  }
+                  onChange={(e) => setDependencies(e.target.value || null)}
                   placeholder="task-id-1, task-id-2"
                   disabled={disabled}
                 />
@@ -525,7 +568,10 @@ export default function TaskModal({
                   Delete
                 </button>
 
+<<<<<<< HEAD
                 {/* 👇 ปุ่ม Duplicate ใหม่ */}
+=======
+>>>>>>> a963876 (upddated maintenance function)
                 {onDuplicate && (
                   <button
                     type="button"
@@ -554,8 +600,7 @@ export default function TaskModal({
                   marginRight: 6,
                 }}
               >
-                You have view-only access with your
-                current role.
+                You have view-only access with your current role.
               </span>
             )}
             <button

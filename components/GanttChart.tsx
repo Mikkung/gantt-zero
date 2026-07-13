@@ -30,6 +30,53 @@ function formatInputDate(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+type DateSpan = { start: Date; end: Date } | null;
+
+function makeSpan(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): DateSpan {
+  const s = toDate(start) ?? toDate(end) ?? null;
+  const e = toDate(end) ?? toDate(start) ?? null;
+
+  if (!s && !e) return null;
+
+  const startDate = s ?? e!;
+  const endDate = e ?? s!;
+
+  return startDate <= endDate
+    ? { start: startDate, end: endDate }
+    : { start: endDate, end: startDate };
+}
+
+function mergeSpans(spans: DateSpan[]): DateSpan {
+  const valid = spans.filter(Boolean) as { start: Date; end: Date }[];
+  if (!valid.length) return null;
+
+  return {
+    start: new Date(Math.min(...valid.map((s) => s.start.getTime()))),
+    end: new Date(Math.max(...valid.map((s) => s.end.getTime()))),
+  };
+}
+
+function clampSpan(
+  span: DateSpan,
+  from: Date | null,
+  to: Date | null,
+): DateSpan {
+  if (!span) return null;
+
+  let start = new Date(span.start);
+  let end = new Date(span.end);
+
+  if (from && start < from) start = new Date(from);
+  if (to && end > to) end = new Date(to);
+
+  if (end < start) end = new Date(start);
+
+  return { start, end };
+}
+
 // check ว่างานตัดกับ range หรือไม่
 function rangesIntersect(
   start: string | null | undefined,
@@ -54,6 +101,48 @@ function rangesIntersect(
   return true;
 }
 
+function getCalendarDurationDays(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): number | null {
+  const s = toDate(start) ?? toDate(end);
+  const e = toDate(end) ?? toDate(start);
+
+  if (!s || !e) return null;
+
+  const startOnly = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+  const endOnly = new Date(e.getFullYear(), e.getMonth(), e.getDate());
+
+  const diffMs = endOnly.getTime() - startOnly.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+
+  return diffDays > 0 ? diffDays : 1;
+}
+
+function buildTaskDisplayLabel(task: Task): string {
+  const count = (task as any).frequency_count;
+  const unit = (task as any).frequency_unit;
+  const minutes = (task as any).time_per_occurrence_minutes;
+
+  if (
+    typeof count === 'number' &&
+    count > 0 &&
+    typeof minutes === 'number' &&
+    minutes > 0
+  ) {
+    const hours = (count * minutes) / 60;
+    const unitText = unit === 'year' ? 'ปี' : 'เดือน';
+    return `${task.name} (${hours.toFixed(1)} ชม./${unitText})`;
+  }
+
+  const days = getCalendarDurationDays(task.start_date, task.end_date);
+  if (days) {
+    return `${task.name} (${days} วัน)`;
+  }
+
+  return task.name;
+}
+
 // -------- Tree row model (user > category > task) --------
 
 type TreeRowKind = 'user' | 'category' | 'task';
@@ -61,14 +150,14 @@ type TreeRowKind = 'user' | 'category' | 'task';
 type TreeRow =
   | {
       kind: 'user';
-      id: string; // e.g. "user:abcd"
+      id: string;
       depth: number;
       label: string;
-      userKey: string; // assignee key
+      userKey: string;
     }
   | {
       kind: 'category';
-      id: string; // e.g. "cat:userKey:routine"
+      id: string;
       depth: number;
       label: string;
       userKey: string;
@@ -76,13 +165,12 @@ type TreeRow =
     }
   | {
       kind: 'task';
-      id: string; // task.id
+      id: string;
       depth: number;
       label: string;
       task: Task;
     };
 
-// mapping ประเภทงาน (work_type) → label ภาษาไทย
 const WORK_TYPES: { value: string; label: string }[] = [
   { value: 'routine', label: 'งานประจำ' },
   { value: 'strategic', label: 'งานยุทธศาสตร์' },
@@ -111,19 +199,22 @@ export default function GanttChart({
     () => new Set(),
   );
 
+<<<<<<< HEAD
   // ใช้จำว่าเรา set default collapse ไปแล้วหรือยัง (กันทำซ้ำ)
   const initialCollapseAppliedRef = useRef(false);
 
   // filter ประเภทงาน (ค่าเริ่มต้น = แสดงทุกประเภท)
+=======
+  const initialCollapseAppliedRef = useRef(false);
+
+>>>>>>> a963876 (upddated maintenance function)
   const [workTypeFilter, setWorkTypeFilter] = useState<string[]>(() =>
     WORK_TYPES.map((w) => w.value),
   );
 
-  // ช่วงวันที่ให้ user เลือก
   const [viewFrom, setViewFrom] = useState<string | null>(null);
   const [viewTo, setViewTo] = useState<string | null>(null);
 
-  // default: 7 วันก่อนวันนี้ → 90 วันหลังจากวันนี้
   useEffect(() => {
     const today = new Date();
     const from = new Date(today);
@@ -136,6 +227,7 @@ export default function GanttChart({
     setViewTo(formatInputDate(to));
   }, []);
 
+<<<<<<< HEAD
   // 1) filter งานตามช่วงวันที่
   //const dateFilteredTasks = useMemo(() => {
   //  return (tasks || []).filter((t) =>
@@ -145,9 +237,15 @@ export default function GanttChart({
   
   const dateFilteredTasks = useMemo(() => {
     return tasks || [];
+=======
+  const dateFilteredTasks = useMemo(() => {
+    return tasks || [];
+    // return (tasks || []).filter((t) =>
+    //   rangesIntersect(t.start_date, t.end_date, viewFrom, viewTo),
+    // );
+>>>>>>> a963876 (upddated maintenance function)
   }, [tasks]);
 
-  // map สำหรับหา Task จาก id ได้เร็ว ๆ (ใช้ใน popup / update)
   const taskById = useMemo(() => {
     const map: Record<string, Task> = {};
     for (const t of dateFilteredTasks) {
@@ -156,7 +254,6 @@ export default function GanttChart({
     return map;
   }, [dateFilteredTasks]);
 
-  // ใช้บอกว่า task ไหนมีลูก (subtask) เอาไปแสดง caret ใน tree
   const taskHasChildren = useMemo(() => {
     const map: Record<string, boolean> = {};
     for (const t of dateFilteredTasks) {
@@ -167,16 +264,11 @@ export default function GanttChart({
     return map;
   }, [dateFilteredTasks]);
 
-  /**
-   * 2) เตรียม treeRows = [ user > category > task/subtask ... ]
-   *    เพื่อให้ทั้ง tree ซ้าย และ Gantt ขวา ใช้ลำดับ row เดียวกัน
-   */
   const treeRows = useMemo<TreeRow[]>(() => {
     const rows: TreeRow[] = [];
 
     if (!dateFilteredTasks.length) return rows;
 
-    // group tasks ตาม assignee (user)
     const byUser: Record<
       string,
       {
@@ -205,7 +297,6 @@ export default function GanttChart({
       const userRowId = `user:${userKey}`;
       const userCollapsed = collapsedParents.has(userRowId);
 
-      // User row (depth 0)
       rows.push({
         kind: 'user',
         id: userRowId,
@@ -214,14 +305,11 @@ export default function GanttChart({
         userKey,
       });
 
-      // ถ้า user ถูก collapse → ไม่สร้าง category / task ใต้ user นี้เลย
       if (userCollapsed) {
         continue;
       }
 
-      // แยก task ตาม work_type ภายใน user นี้
       for (const wt of WORK_TYPES) {
-        // ถ้า filter ประเภทงานไม่เลือก type นี้ → ข้าม
         if (!workTypeFilter.includes(wt.value)) continue;
 
         const catTasksAll = userInfo.tasks.filter((t) => {
@@ -232,7 +320,6 @@ export default function GanttChart({
         const catRowId = `cat:${userKey}:${wt.value}`;
         const catCollapsed = collapsedParents.has(catRowId);
 
-        // สร้าง category row เสมอถ้ามี task อย่างน้อย 1 ใน type นี้
         if (catTasksAll.length > 0) {
           rows.push({
             kind: 'category',
@@ -248,7 +335,6 @@ export default function GanttChart({
           continue;
         }
 
-        // ภายใน category นี้ สร้าง tree parent_id → children
         const childrenByParent: Record<string, Task[]> = {};
         catTasksAll.forEach((t) => {
           const key = t.parent_id || 'root';
@@ -262,9 +348,18 @@ export default function GanttChart({
           parentHidden: boolean,
         ) => {
           const list = childrenByParent[parentId || 'root'] || [];
+
+          list.sort((a, b) => {
+            const aStart = toDate(a.start_date)?.getTime() ?? 0;
+            const bStart = toDate(b.start_date)?.getTime() ?? 0;
+            if (aStart !== bStart) return aStart - bStart;
+            return a.name.localeCompare(b.name);
+          });
+
           for (const t of list) {
             const rowId = t.id;
             const isCollapsed = collapsedParents.has(rowId);
+
             if (!parentHidden) {
               rows.push({
                 kind: 'task',
@@ -274,12 +369,12 @@ export default function GanttChart({
                 task: t,
               });
             }
+
             const nextHidden = parentHidden || isCollapsed;
             walkTasks(t.id, depth + 1, nextHidden);
           }
         };
 
-        // เริ่มจาก root parent (depth = 2 เพราะ 0=user, 1=category)
         walkTasks(null, 2, false);
       }
     }
@@ -287,7 +382,10 @@ export default function GanttChart({
     return rows;
   }, [dateFilteredTasks, collapsedParents, workTypeFilter]);
 
+<<<<<<< HEAD
   // ---------- NEW: default collapse category rows on first load ----------
+=======
+>>>>>>> a963876 (upddated maintenance function)
   useEffect(() => {
     if (initialCollapseAppliedRef.current) return;
     if (!treeRows.length) return;
@@ -298,15 +396,105 @@ export default function GanttChart({
       const next = new Set(prev);
       for (const row of treeRows) {
         if (row.kind === 'category') {
+<<<<<<< HEAD
           next.add(row.id); // collapse ทุก category ตอนเริ่มต้น
+=======
+          next.add(row.id);
+>>>>>>> a963876 (upddated maintenance function)
         }
       }
       return next;
     });
   }, [treeRows]);
+<<<<<<< HEAD
   // -----------------------------------------------------------------------
 
   // 3) สร้าง / อัปเดต Gantt
+=======
+
+  const rowSpanById = useMemo(() => {
+    const rowSpans: Record<string, DateSpan> = {};
+
+    const byId: Record<string, Task> = {};
+    const childrenByParent: Record<string, Task[]> = {};
+
+    for (const t of dateFilteredTasks) {
+      byId[t.id] = t;
+      const key = t.parent_id || 'root';
+      if (!childrenByParent[key]) childrenByParent[key] = [];
+      childrenByParent[key].push(t);
+    }
+
+    const taskSpanCache = new Map<string, DateSpan>();
+
+    const getTaskSpan = (taskId: string): DateSpan => {
+      if (taskSpanCache.has(taskId)) {
+        return taskSpanCache.get(taskId)!;
+      }
+
+      const task = byId[taskId];
+      if (!task) {
+        taskSpanCache.set(taskId, null);
+        return null;
+      }
+
+      const ownSpan = makeSpan(task.start_date, task.end_date);
+      const childSpans = (childrenByParent[taskId] || []).map((child) =>
+        getTaskSpan(child.id),
+      );
+
+      const merged = mergeSpans([ownSpan, ...childSpans]);
+      taskSpanCache.set(taskId, merged);
+      return merged;
+    };
+
+    for (const row of treeRows) {
+      if (row.kind === 'task') {
+        rowSpans[row.id] = getTaskSpan(row.id);
+        continue;
+      }
+
+      if (row.kind === 'category') {
+        const spans = dateFilteredTasks
+          .filter(
+            (t) =>
+              (t.assignee || '__unassigned__') === row.userKey &&
+              normalizeWorkType((t as any).work_type) === row.workType,
+          )
+          .map((t) => getTaskSpan(t.id));
+
+        rowSpans[row.id] = mergeSpans(spans);
+        continue;
+      }
+
+      if (row.kind === 'user') {
+        const spans = dateFilteredTasks
+          .filter(
+            (t) =>
+              (t.assignee || '__unassigned__') === row.userKey &&
+              workTypeFilter.includes(
+                normalizeWorkType((t as any).work_type),
+              ),
+          )
+          .map((t) => getTaskSpan(t.id));
+
+        rowSpans[row.id] = mergeSpans(spans);
+      }
+    }
+
+    return rowSpans;
+  }, [dateFilteredTasks, treeRows, workTypeFilter]);
+
+  const toggleCollapse = (id: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+>>>>>>> a963876 (upddated maintenance function)
   useEffect(() => {
     if (!ganttRef.current || treeRows.length === 0) {
       if (ganttRef.current) ganttRef.current.innerHTML = '';
@@ -318,34 +506,26 @@ export default function GanttChart({
     const fromD = viewFrom ? toDate(viewFrom) : null;
     const toD = viewTo ? toDate(viewTo) : null;
 
-    // สร้าง task list ให้ Gantt โดยให้มี 1 row ต่อ 1 treeRow เสมอ
     const ganttTasks = treeRows.map((row) => {
+      const rowSpan = clampSpan(rowSpanById[row.id] ?? null, fromD, toD);
+
       if (row.kind === 'task') {
         const t = row.task;
-        const origStart = toDate(t.start_date);
-        const origEnd = toDate(t.end_date);
 
-        let displayStart = origStart;
-        let displayEnd = origEnd;
+        const fallbackSpan = makeSpan(t.start_date, t.end_date);
+        const finalSpan = rowSpan ?? fallbackSpan;
 
-        // clamp ให้ไม่ออกนอก view range
-        if (fromD && displayStart && displayStart < fromD) {
-          displayStart = fromD;
-        }
-        if (toD && displayEnd && displayEnd > toD) {
-          displayEnd = toD;
-        }
+        const startStr = finalSpan
+          ? formatInputDate(finalSpan.start)
+          : (t.start_date ?? viewFrom ?? formatInputDate(new Date()));
 
-        const startStr =
-          displayStart != null
-            ? formatInputDate(displayStart)
-            : t.start_date;
-        const endStr =
-          displayEnd != null ? formatInputDate(displayEnd) : t.end_date;
+        const endStr = finalSpan
+          ? formatInputDate(finalSpan.end)
+          : (t.end_date ?? t.start_date ?? viewFrom ?? formatInputDate(new Date()));
 
         return {
           id: row.id,
-          name: row.label,
+          name: buildTaskDisplayLabel(t),
           start: startStr,
           end: endStr,
           progress: t.progress ?? 0,
@@ -356,15 +536,21 @@ export default function GanttChart({
         };
       }
 
-      // กรณี user / category → ใช้ "fake task" เพื่อเก็บ row height ให้ align กับ tree
       const baseDate =
         viewFrom && toDate(viewFrom) ? toDate(viewFrom)! : new Date();
-      const startStr = formatInputDate(baseDate);
 
-      // ให้ end = start + 1 day กัน error duration 0
-      const endDate = new Date(baseDate);
-      endDate.setDate(endDate.getDate() + 1);
-      const endStr = formatInputDate(endDate);
+      const fallbackStart = formatInputDate(baseDate);
+      const fallbackEndDate = new Date(baseDate);
+      fallbackEndDate.setDate(fallbackEndDate.getDate() + 1);
+      const fallbackEnd = formatInputDate(fallbackEndDate);
+
+      const startStr = rowSpan
+        ? formatInputDate(rowSpan.start)
+        : fallbackStart;
+
+      const endStr = rowSpan
+        ? formatInputDate(rowSpan.end)
+        : fallbackEnd;
 
       const customClass =
         row.kind === 'user'
@@ -391,7 +577,6 @@ export default function GanttChart({
       custom_popup_html: (task: any) => {
         const original = taskById[task.id];
 
-        // ถ้าเป็น row header (user / category) ไม่ต้องขึ้น popup
         if (!original) return '';
 
         const formatDate = (value: any) => {
@@ -438,18 +623,16 @@ export default function GanttChart({
       on_click: (task: any) => {
         const original = taskById[task.id];
 
-        // header row → toggle collapse
         if (!original) {
           toggleCollapse(task.id);
           return;
         }
 
-        // task row → เปิด modal
         onTaskClick(original);
       },
       on_date_change: async (task: any, start: Date, end: Date) => {
         const original = taskById[task.id];
-        if (!original) return; // header row ไม่ต้อง update DB
+        if (!original) return;
 
         const newStart = start.toISOString().split('T')[0];
         const newEnd = end.toISOString().split('T')[0];
@@ -464,7 +647,7 @@ export default function GanttChart({
       },
       on_progress_change: async (task: any, progress: number) => {
         const original = taskById[task.id];
-        if (!original) return; // header row
+        if (!original) return;
 
         const { error } = await supabase
           .from('tasks')
@@ -476,7 +659,6 @@ export default function GanttChart({
       },
     });
 
-    // scroll ให้ไปใกล้ viewFrom (หรือใช้ start งานอันแรก ถ้าไม่มี)
     try {
       const firstTaskRow = treeRows.find((r) => r.kind === 'task') as
         | Extract<TreeRow, { kind: 'task' }>
@@ -493,14 +675,12 @@ export default function GanttChart({
       // ignore
     }
 
-    // ====== วาดเส้น Today ลงใน SVG ของ Gantt ======
     try {
       const svgEl: SVGSVGElement | null = (gantt as any).$svg || null;
       const ganttStart: Date | undefined = (gantt as any).gantt_start;
       const ganttEnd: Date | undefined = (gantt as any).gantt_end;
 
       if (svgEl && ganttStart && ganttEnd) {
-        // ลบเส้นเก่าก่อน (กันซ้อน)
         svgEl
           .querySelectorAll('.today-highlight-line')
           .forEach((el) => el.parentNode?.removeChild(el));
@@ -525,7 +705,6 @@ export default function GanttChart({
         const endMs = ganttEnd.getTime();
         const todayMs = todayMidnight.getTime();
 
-        // วาดเฉพาะถ้าวันนี้อยู่ในช่วงของ Gantt
         if (todayMs >= startMs && todayMs <= endMs && width > 0) {
           const ratio = (todayMs - startMs) / (endMs - startMs || 1);
           const x = ratio * width;
@@ -551,9 +730,17 @@ export default function GanttChart({
     } catch (e) {
       console.error('Failed to draw today line', e);
     }
-  }, [treeRows, viewMode, onTaskClick, onTaskUpdate, viewFrom, viewTo, taskById]);
+  }, [
+    treeRows,
+    viewMode,
+    onTaskClick,
+    onTaskUpdate,
+    viewFrom,
+    viewTo,
+    taskById,
+    rowSpanById,
+  ]);
 
-  // 4) sync scroll: ให้ scrollDown Gantt แล้ว Tree เลื่อนตาม
   useEffect(() => {
     const treeEl = treeRef.current;
     const bodyEl = bodyScrollRef.current;
@@ -581,16 +768,6 @@ export default function GanttChart({
     };
   }, [treeRows.length]);
 
-  // toggle tree collapse (ใช้ได้กับทั้ง user, category, task parent)
-  const toggleCollapse = (id: string) => {
-    setCollapsedParents((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const hasAnyTaskRow = treeRows.some((r) => r.kind === 'task');
 
   const handleTodayRange = () => {
@@ -610,8 +787,7 @@ export default function GanttChart({
         if (prev.includes(value)) return prev;
         return [...prev, value];
       }
-      const next = prev.filter((v) => v !== value);
-      return next;
+      return prev.filter((v) => v !== value);
     });
   };
 
@@ -626,7 +802,6 @@ export default function GanttChart({
         </div>
 
         <div style={{ textAlign: 'right' }}>
-          {/* legend */}
           <div className="gantt-legend">
             <div className="gantt-legend-item">
               <span
@@ -651,7 +826,6 @@ export default function GanttChart({
             </div>
           </div>
 
-          {/* view mode + date range + work type filter */}
           <div
             style={{
               display: 'flex',
@@ -727,7 +901,6 @@ export default function GanttChart({
               </div>
             </div>
 
-            {/* work type filter */}
             <div
               style={{
                 display: 'flex',
@@ -772,13 +945,11 @@ export default function GanttChart({
       </div>
 
       <div className="gantt-layout">
-        {/* Tree */}
         <div className="gantt-tree" ref={treeRef}>
           {treeRows.length ? (
             treeRows.map((row) => {
               const isCollapsed = collapsedParents.has(row.id);
 
-              // มีลูกไหม? (user/category ให้ถือว่ามีลูกเสมอ, task ดูจาก map จริง)
               let hasChildren = false;
               if (row.kind === 'user' || row.kind === 'category') {
                 hasChildren = true;
@@ -825,7 +996,6 @@ export default function GanttChart({
           )}
         </div>
 
-        {/* Chart */}
         <div className="gantt-body" ref={bodyScrollRef}>
           <div ref={ganttRef} />
           {!hasAnyTaskRow && (
@@ -842,3 +1012,4 @@ export default function GanttChart({
     </div>
   );
 }
+
