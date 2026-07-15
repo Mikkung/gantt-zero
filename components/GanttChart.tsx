@@ -322,9 +322,13 @@ export default function GanttChart({
           continue;
         }
 
+        const catTaskIds = new Set(catTasksAll.map((t) => t.id));
         const childrenByParent: Record<string, Task[]> = {};
         catTasksAll.forEach((t) => {
-          const key = t.parent_id || 'root';
+          const key =
+            t.parent_id && catTaskIds.has(t.parent_id)
+              ? t.parent_id
+              : 'root';
           if (!childrenByParent[key]) childrenByParent[key] = [];
           childrenByParent[key].push(t);
         });
@@ -504,7 +508,7 @@ export default function GanttChart({
           name: buildTaskDisplayLabel(t),
           start: startStr,
           end: endStr,
-          progress: t.progress ?? 0,
+          progress: t.calculated_progress ?? t.progress ?? 0,
           dependencies: t.dependencies || '',
           custom_class: `status-${(t.status || '')
             .toLowerCase()
@@ -584,6 +588,10 @@ export default function GanttChart({
             <div style="display:flex;justify-content:space-between;color:#64748b;margin-bottom:2px">
               <span>Progress</span>
               <span style="font-weight:600;color:#0f172a">${task.progress || 0}%</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;color:#64748b;margin-bottom:2px">
+              <span>Weight</span>
+              <span style="font-weight:600;color:#0f172a">${original.weight || 0}</span>
             </div>
             ${
               original.assignee

@@ -139,6 +139,60 @@ export function AppShell({
           </div>
         </div>
 
+        {/* assessment */}
+        <div>
+          <div className="app-sidebar-section-title">ASSESSMENT</div>
+          <div className="app-sidebar-nav">
+            <Link
+              href="/employee/assessment"
+              style={{
+                width: '100%',
+                borderRadius: 10,
+                padding: '8px 10px',
+                fontSize: 13,
+                color: '#475569',
+                textDecoration: 'none',
+                display: 'flex',
+              }}
+            >
+              Self evaluation
+            </Link>
+            {currentProfile?.role === 'admin' && (
+              <Link
+                href="/admin/assessment-periods"
+                style={{
+                  width: '100%',
+                  borderRadius: 10,
+                  padding: '8px 10px',
+                  fontSize: 13,
+                  color: '#475569',
+                  textDecoration: 'none',
+                  display: 'flex',
+                }}
+              >
+                Period setup
+              </Link>
+            )}
+            {(currentProfile?.role === 'admin' ||
+              currentProfile?.role === 'manager') && (
+              <Link
+                href="/manager/evaluations"
+                style={{
+                  width: '100%',
+                  borderRadius: 10,
+                  padding: '8px 10px',
+                  fontSize: 13,
+                  color: '#475569',
+                  textDecoration: 'none',
+                  display: 'flex',
+                }}
+              >
+                Manager evaluation
+              </Link>
+            )}
+          </div>
+        </div>
+
         {/* team / assignee */}
         <div>
           <div className="app-sidebar-section-title">Team</div>

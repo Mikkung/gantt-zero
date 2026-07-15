@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Task, Profile } from '../types';
+import { generateDeterministicProgressSummary } from '../utils/taskProgress';
 
 // ถ้าคุณย้าย WorkType ไปไว้ใน types.ts แล้ว export ก็ลบ type นี้ออกได้
 export type WorkType =
@@ -28,6 +29,7 @@ interface TaskModalProps {
   users?: Profile[];
   currentUser?: Profile | null;
   canEdit?: boolean;
+  defaultAssignee?: string | null;
   onClose: () => void;
   onSave: (partial: Partial<Task>) => void;
   onDelete: (id: string) => void;
@@ -43,6 +45,7 @@ export default function TaskModal({
   users = [],
   currentUser,
   canEdit = true,
+  defaultAssignee,
   onClose,
   onSave,
   onDelete,
@@ -59,6 +62,8 @@ export default function TaskModal({
   const [status, setStatus] = useState<Task['status']>('To Do');
   const [priority, setPriority] = useState<Task['priority']>('Medium');
   const [progress, setProgress] = useState<number>(0);
+  const [weight, setWeight] = useState<number | ''>(0);
+  const [progressSummary, setProgressSummary] = useState('');
   const [assignee, setAssignee] = useState<string | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
@@ -110,6 +115,8 @@ export default function TaskModal({
       setStatus(task.status);
       setPriority(task.priority);
       setProgress(task.progress ?? 0);
+      setWeight(task.weight ?? 0);
+      setProgressSummary(task.progress_summary ?? '');
       setAssignee(task.assignee);
       setParentId(task.parent_id ?? null);
       setIsRecurring(task.is_recurring ?? false);
@@ -136,7 +143,9 @@ export default function TaskModal({
       setStatus('To Do');
       setPriority('Medium');
       setProgress(0);
-      setAssignee(currentUser?.display_name ?? null);
+      setWeight(0);
+      setProgressSummary('');
+      setAssignee(defaultAssignee ?? currentUser?.display_name ?? null);
       setParentId(null);
       setIsRecurring(false);
       setRecurringType('none');
@@ -151,7 +160,7 @@ export default function TaskModal({
       setFrequencyUnit('month');
       setTimePerOccurrenceMinutes('');
     }
-  }, [isOpen, task, currentUser]);
+  }, [isOpen, task, currentUser, defaultAssignee]);
 
   if (!isOpen) return null;
 
@@ -206,6 +215,10 @@ export default function TaskModal({
       alert('Please choose an assignee.');
       return;
     }
+    if (weight !== '' && Number(weight) < 0) {
+      alert('Weight cannot be negative.');
+      return;
+    }
 
     onSave({
       id: task?.id,
@@ -216,6 +229,8 @@ export default function TaskModal({
       status,
       priority,
       progress,
+      weight: weight === '' ? 0 : Number(weight),
+      progress_summary: progressSummary.trim() || null,
       assignee,
       parent_id: parentId,
       is_recurring: isRecurring,
@@ -245,6 +260,14 @@ export default function TaskModal({
     if (!onDuplicate) return;
     onDuplicate(task);
   };
+
+  const handleGenerateSummary = () => {
+    if (!task) return;
+    setProgressSummary(generateDeterministicProgressSummary(task, allTasks));
+  };
+
+  const canGenerateSummary =
+    !!task && allTasks.some((candidate) => candidate.parent_id === task.id);
 
   const RequiredMark = () => (
     <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
@@ -479,6 +502,46 @@ export default function TaskModal({
                   onChange={(e) => handleProgressChange(Number(e.target.value))}
                   disabled={disabled}
                 />
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div className="field-label">Weight</div>
+                <input
+                  type="number"
+                  className="input"
+                  value={weight}
+                  onChange={(e) =>
+                    setWeight(
+                      e.target.value === '' ? '' : Number(e.target.value),
+                    )
+                  }
+                  placeholder="0"
+                  min={0}
+                  step="0.1"
+                  disabled={disabled}
+                />
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <div className="field-label">Progress Summary</div>
+                <textarea
+                  className="textarea"
+                  value={progressSummary}
+                  onChange={(e) => setProgressSummary(e.target.value)}
+                  placeholder="Optional progress note for this task"
+                  disabled={disabled}
+                />
+                {canGenerateSummary && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleGenerateSummary}
+                    disabled={disabled}
+                    style={{ marginTop: 6 }}
+                  >
+                    Generate Summary
+                  </button>
+                )}
               </div>
 
               {/* Assignee */}

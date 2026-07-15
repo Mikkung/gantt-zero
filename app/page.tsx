@@ -7,6 +7,17 @@ import { AppShell } from '../components/AppShell';
 import GanttChart from '../components/GanttChart';
 import TaskModal from '../components/TaskModal';
 import { supabase } from '../utils/supabase';
+import {
+  calculateTaskProgressMetrics,
+  calculateWorkloadSummary,
+  formatNumber,
+  formatProgress,
+} from '../utils/taskProgress';
+import {
+  getHierarchicalTaskRows,
+  groupTasksByAssigneeAndWorkType,
+  groupTasksByWorkType,
+} from '../utils/taskGrouping';
 import type { Task, Team, Profile, Role } from '../types';
 
 type ViewType = 'gantt' | 'list' | 'board' | 'calendar';
@@ -211,7 +222,11 @@ export default function HomePage() {
   const roleFilteredTasks = useMemo(() => {
     if (!currentProfile || roleCanSeeAll(currentProfile.role)) return tasks;
     if (!currentProfile.team_id) return tasks;
-    return tasks.filter((t) => t.team_id === currentProfile.team_id);
+    return tasks.filter(
+      (t) =>
+        t.team_id === currentProfile.team_id ||
+        (!t.team_id && t.assignee === currentProfile.display_name),
+    );
   }, [tasks, currentProfile]);
 
   const timeFilteredTasks = useMemo(() => {
@@ -245,6 +260,26 @@ export default function HomePage() {
       return true;
     });
   }, [timeFilteredTasks, filterTeamId, filterAssignee]);
+
+  const progressMetrics = useMemo(
+    () => calculateTaskProgressMetrics(fullyFilteredTasks),
+    [fullyFilteredTasks],
+  );
+
+  const tasksWithCalculatedProgress = useMemo(
+    () =>
+      fullyFilteredTasks.map((task) => ({
+        ...task,
+        calculated_progress:
+          progressMetrics[task.id]?.calculatedProgress ?? null,
+      })),
+    [fullyFilteredTasks, progressMetrics],
+  );
+
+  const workloadSummary = useMemo(
+    () => calculateWorkloadSummary(fullyFilteredTasks),
+    [fullyFilteredTasks],
+  );
 
   // tasks ที่ไม่มีลูก = leaf tasks (งานจริง)
   const leafTasks = useMemo(() => {
@@ -303,6 +338,21 @@ export default function HomePage() {
     setIsModalOpen(true);
   };
 
+  const upsertTaskInState = (task: Task) => {
+    setTasks((prev) => {
+      const exists = prev.some((candidate) => candidate.id === task.id);
+      const next = exists
+        ? prev.map((candidate) =>
+            candidate.id === task.id ? { ...candidate, ...task } : candidate,
+          )
+        : [...prev, task];
+
+      return next.sort((a, b) =>
+        (a.start_date ?? '').localeCompare(b.start_date ?? ''),
+      );
+    });
+  };
+
   const handleSaveTask = async (partial: Partial<Task>) => {
     try {
       if (!canEditTasks) return;
@@ -317,17 +367,30 @@ export default function HomePage() {
         partial.assignee === '' || partial.assignee == null
           ? null
           : partial.assignee;
+      const parentTask = partial.parent_id
+        ? tasks.find((task) => task.id === partial.parent_id)
+        : null;
+      const defaultTeamId = roleCanSeeAll(currentProfile?.role)
+        ? filterTeamId ?? currentProfile?.team_id ?? null
+        : currentProfile?.team_id ?? null;
+      const normalizedTeamId =
+        parentTask?.team_id ??
+        (partial as any).team_id ??
+        defaultTeamId;
+      let savedTaskForState: Task | null = null;
 
       if (selectedTask) {
         // ========= UPDATE =========
         const { id, ...rest } = partial;
+        const updatePayload = {
+          ...rest,
+          assignee: normalizedAssignee,
+          team_id: normalizedTeamId,
+        };
 
         const { error } = await supabase
           .from('tasks')
-          .update({
-            ...rest,
-            assignee: normalizedAssignee,
-          })
+          .update(updatePayload)
           .eq('id', selectedTask.id);
 
         if (error) {
@@ -342,9 +405,19 @@ export default function HomePage() {
           );
           return;
         }
+        savedTaskForState = {
+          ...selectedTask,
+          ...updatePayload,
+          id: selectedTask.id,
+        } as Task;
       } else {
         // ========= INSERT =========
+        const taskId =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : undefined;
         const insertPayload: any = {
+          id: taskId,
           name: partial.name.trim(),
           description: partial.description ?? '',
           start_date: partial.start_date ?? null,
@@ -352,6 +425,9 @@ export default function HomePage() {
           status: partial.status ?? 'To Do',
           priority: partial.priority ?? 'Medium',
           progress: partial.progress ?? 0,
+          weight: partial.weight ?? 0,
+          calculated_progress: null,
+          progress_summary: partial.progress_summary ?? null,
 
           assignee: normalizedAssignee,
 
@@ -368,16 +444,13 @@ export default function HomePage() {
 
           dependencies: partial.dependencies ?? '',
 
-          team_id:
-            (partial as any).team_id ?? currentProfile?.team_id ?? null,
+          team_id: normalizedTeamId,
           parent_id: partial.parent_id ?? null,
         };
 
         // work_type (routine / strategic / process / self / other)
         (insertPayload as any).work_type =
           (partial as any).work_type ?? 'routine';
-
-        console.log('Insert payload', insertPayload);
 
         const { error } = await supabase.from('tasks').insert(insertPayload);
 
@@ -393,10 +466,14 @@ export default function HomePage() {
           );
           return;
         }
+        savedTaskForState = insertPayload as Task;
       }
 
       setIsModalOpen(false);
       await loadTasks();
+      if (savedTaskForState) {
+        upsertTaskInState(savedTaskForState);
+      }
     } catch (err) {
       console.error('handleSaveTask unexpected error:', err);
       alert('Unexpected error when saving task.');
@@ -457,6 +534,9 @@ export default function HomePage() {
         parent_id: task.parent_id ?? null,
 
         work_type: (task as any).work_type ?? 'routine',
+        weight: task.weight ?? 0,
+        calculated_progress: null,
+        progress_summary: task.progress_summary ?? null,
       };
 
       const { error } = await supabase.from('tasks').insert(insertPayload);
@@ -476,6 +556,7 @@ export default function HomePage() {
 
       setIsModalOpen(false); // ถ้าอยากให้ modal ยังเปิดอยู่ก็ลบบรรทัดนี้ได้
       await loadTasks();
+      upsertTaskInState(insertPayload as Task);
     } catch (err) {
       console.error('handleDuplicateTask unexpected error:', err);
       alert('Unexpected error when duplicating task.');
@@ -503,10 +584,79 @@ export default function HomePage() {
   function TasksListView({
     tasks,
     onTaskClick,
+    groupByAssignee = true,
   }: {
     tasks: Task[];
     onTaskClick: (t: Task) => void;
+    groupByAssignee?: boolean;
   }) {
+    const listMetrics = useMemo(
+      () => calculateTaskProgressMetrics(tasks),
+      [tasks],
+    );
+    const parentIds = useMemo(
+      () =>
+        new Set(
+          tasks
+            .filter((task) => task.parent_id)
+            .map((task) => task.parent_id as string),
+        ),
+      [tasks],
+    );
+    const assigneeGroups = useMemo(
+      () => groupTasksByAssigneeAndWorkType(tasks),
+      [tasks],
+    );
+    const workTypeGroups = useMemo(() => groupTasksByWorkType(tasks), [tasks]);
+
+    const renderTaskRows = (groupTasks: Task[]) =>
+      getHierarchicalTaskRows(groupTasks).map(({ task: t, depth }) => {
+        const metric = listMetrics[t.id];
+        const isParent = parentIds.has(t.id);
+
+        return (
+          <tr
+            key={t.id}
+            style={{ cursor: 'pointer' }}
+            onClick={() => onTaskClick(t)}
+          >
+            <td
+              style={{
+                padding: 6,
+                paddingLeft: 6 + depth * 18,
+                fontWeight: isParent ? 600 : 400,
+              }}
+            >
+              {depth > 0 ? '↳ ' : ''}
+              {t.name}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>
+              {t.assignee}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>{t.status}</td>
+            <td style={{ padding: 6, textAlign: 'center' }}>
+              {formatNumber(metric?.weight ?? 0)}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>
+              {formatProgress(metric?.displayProgress)}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>
+              {metric?.isParent ? formatProgress(metric.calculatedProgress) : '-'}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>
+              {formatNumber(metric?.weightedContribution ?? 0)}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>
+              {t.start_date}
+            </td>
+            <td style={{ padding: 6, textAlign: 'center' }}>{t.end_date}</td>
+            <td style={{ padding: 6, color: '#64748b' }}>
+              {t.progress_summary || '-'}
+            </td>
+          </tr>
+        );
+      });
+
     return (
       <div style={{ overflow: 'auto' }}>
         <table
@@ -521,30 +671,73 @@ export default function HomePage() {
               <th style={{ padding: 6, textAlign: 'left' }}>Task</th>
               <th style={{ padding: 6 }}>Assignee</th>
               <th style={{ padding: 6 }}>Status</th>
+              <th style={{ padding: 6 }}>Weight</th>
+              <th style={{ padding: 6 }}>Progress</th>
+              <th style={{ padding: 6 }}>Calculated</th>
+              <th style={{ padding: 6 }}>Contribution</th>
               <th style={{ padding: 6 }}>Start</th>
               <th style={{ padding: 6 }}>End</th>
+              <th style={{ padding: 6, textAlign: 'left' }}>Summary</th>
             </tr>
           </thead>
           <tbody>
-            {tasks.map((t) => (
-              <tr
-                key={t.id}
-                style={{ cursor: 'pointer' }}
-                onClick={() => onTaskClick(t)}
-              >
-                <td style={{ padding: 6 }}>{t.name}</td>
-                <td style={{ padding: 6, textAlign: 'center' }}>
-                  {t.assignee}
-                </td>
-                <td style={{ padding: 6, textAlign: 'center' }}>{t.status}</td>
-                <td style={{ padding: 6, textAlign: 'center' }}>
-                  {t.start_date}
-                </td>
-                <td style={{ padding: 6, textAlign: 'center' }}>
-                  {t.end_date}
+            {groupByAssignee
+              ? assigneeGroups.flatMap((assigneeGroup) => [
+                  <tr key={`assignee:${assigneeGroup.assignee}`}>
+                    <td
+                      colSpan={10}
+                      style={{
+                        padding: '8px 6px',
+                        background: '#f1f5f9',
+                        color: '#0f172a',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {assigneeGroup.assignee}
+                    </td>
+                  </tr>,
+                  ...assigneeGroup.workTypeGroups.flatMap((workTypeGroup) => [
+                    <tr
+                      key={`worktype:${assigneeGroup.assignee}:${workTypeGroup.workType}`}
+                    >
+                      <td
+                        colSpan={10}
+                        style={{
+                          padding: '6px 6px 6px 18px',
+                          background: '#f8fafc',
+                          color: '#8b2332',
+                          fontWeight: 600,
+                        }}
+                      >
+                        ประเภทงาน: {workTypeGroup.label}
+                      </td>
+                    </tr>,
+                    ...renderTaskRows(workTypeGroup.tasks),
+                  ]),
+                ])
+              : workTypeGroups.flatMap((workTypeGroup) => [
+                  <tr key={`worktype:${workTypeGroup.workType}`}>
+                    <td
+                      colSpan={10}
+                      style={{
+                        padding: '8px 6px',
+                        background: '#f8fafc',
+                        color: '#8b2332',
+                        fontWeight: 600,
+                      }}
+                    >
+                      ประเภทงาน: {workTypeGroup.label}
+                    </td>
+                  </tr>,
+                  ...renderTaskRows(workTypeGroup.tasks),
+                ])}
+            {!tasks.length && (
+              <tr>
+                <td colSpan={10} style={{ padding: 16, color: '#64748b' }}>
+                  No tasks found.
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
@@ -602,36 +795,73 @@ export default function HomePage() {
                 overflowY: 'auto',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 6,
+                gap: 10,
               }}
             >
-              {tasks
-                .filter((t) => t.status === col.key)
-                .map((t) => (
+              {groupTasksByWorkType(
+                tasks.filter((t) => t.status === col.key),
+              ).map((workTypeGroup) => (
+                <div key={workTypeGroup.workType}>
                   <div
-                    key={t.id}
                     style={{
-                      borderRadius: 10,
-                      background: '#ffffff',
-                      border: '1px solid #e2e8f0',
-                      padding: '6px 8px',
-                      cursor: 'pointer',
-                      fontSize: 13,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: '#8b2332',
+                      marginBottom: 4,
                     }}
-                    onClick={() => onTaskClick(t)}
                   >
-                    <div style={{ fontWeight: 500 }}>{t.name}</div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: '#94a3b8',
-                        marginTop: 2,
-                      }}
-                    >
-                      {t.assignee || 'Unassigned'}
-                    </div>
+                    ประเภทงาน: {workTypeGroup.label}
                   </div>
-                ))}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                    }}
+                  >
+                    {workTypeGroup.tasks.map((t) => (
+                      <div
+                        key={t.id}
+                        style={{
+                          borderRadius: 10,
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          padding: '6px 8px',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                        }}
+                        onClick={() => onTaskClick(t)}
+                      >
+                        <div style={{ fontWeight: 500 }}>{t.name}</div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: '#94a3b8',
+                            marginTop: 2,
+                          }}
+                        >
+                          {t.assignee || 'Unassigned'}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: '#64748b',
+                            marginTop: 2,
+                          }}
+                        >
+                          Weight {formatNumber(t.weight ?? 0)} · Progress{' '}
+                          {formatProgress(t.calculated_progress ?? t.progress)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!tasks.some((t) => t.status === col.key) && (
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  No tasks
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -684,21 +914,38 @@ export default function HomePage() {
             >
               {d === 'No date' ? 'No due date' : d}
             </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {byDate[d].map((t) => (
-                <div
-                  key={t.id}
-                  style={{
-                    borderRadius: 999,
-                    padding: '4px 10px',
-                    background: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => onTaskClick(t)}
-                >
-                  {t.name}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {groupTasksByWorkType(byDate[d]).map((workTypeGroup) => (
+                <div key={workTypeGroup.workType}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: '#8b2332',
+                      marginBottom: 4,
+                    }}
+                  >
+                    ประเภทงาน: {workTypeGroup.label}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {workTypeGroup.tasks.map((t) => (
+                      <div
+                        key={t.id}
+                        style={{
+                          borderRadius: 999,
+                          padding: '4px 10px',
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => onTaskClick(t)}
+                      >
+                        {t.name} ·{' '}
+                        {formatProgress(t.calculated_progress ?? t.progress)}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -776,6 +1023,93 @@ export default function HomePage() {
           </div>
         </div>
 
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+            gap: 12,
+            marginBottom: 18,
+          }}
+        >
+          <div className="summary-card">
+            <div className="summary-title">Total scoreable task weight</div>
+            <div className="summary-value">
+              {formatNumber(workloadSummary.totalScoreableWeight)}
+            </div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-title">Scoreable tasks</div>
+            <div className="summary-value">
+              {workloadSummary.scoreableTaskCount}
+            </div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-title">Subtasks</div>
+            <div className="summary-value">
+              {workloadSummary.subtaskCount}
+            </div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-title">Avg calculated</div>
+            <div className="summary-value">
+              {formatProgress(workloadSummary.averageCalculatedProgress)}
+            </div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-title">Weighted total</div>
+            <div className="summary-value">
+              {formatNumber(workloadSummary.totalWeightedContribution)}
+            </div>
+          </div>
+        </div>
+
+        {workloadSummary.scoreableTaskCount > 0 &&
+          Math.abs(workloadSummary.totalScoreableWeight - 100) > 0.01 && (
+            <div
+              style={{
+                marginTop: -8,
+                marginBottom: 14,
+                borderRadius: 10,
+                border: '1px solid #fed7aa',
+                background: '#fffbeb',
+                color: '#92400e',
+                padding: '8px 10px',
+                fontSize: 12,
+              }}
+            >
+              รวมน้ำหนักงานที่ใช้คำนวณขณะนี้คือ{' '}
+              {formatNumber(workloadSummary.totalScoreableWeight)} แนะนำให้รวมเป็น
+              100
+            </div>
+          )}
+
+        {workloadSummary.parentChildWeightWarnings.length > 0 && (
+          <div
+            style={{
+              marginTop: -8,
+              marginBottom: 14,
+              borderRadius: 10,
+              border: '1px solid #fecaca',
+              background: '#fef2f2',
+              color: '#991b1b',
+              padding: '8px 10px',
+              fontSize: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            {workloadSummary.parentChildWeightWarnings.map((warning) => (
+              <div key={warning.taskId}>
+                น้ำหนักของงานหลัก {warning.taskName}{' '}
+                ไม่เท่ากับผลรวมงานย่อย (
+                {formatNumber(warning.parentWeight)} ≠{' '}
+                {formatNumber(warning.childrenWeight)})
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Main view area */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {loading ? (
@@ -793,23 +1127,24 @@ export default function HomePage() {
             </div>
           ) : view === 'gantt' ? (
             <GanttChart
-              tasks={fullyFilteredTasks}
+              tasks={tasksWithCalculatedProgress}
               onTaskUpdate={loadTasks}
               onTaskClick={handleTaskClick}
             />
           ) : view === 'list' ? (
             <TasksListView
-              tasks={fullyFilteredTasks}
+              tasks={tasksWithCalculatedProgress}
               onTaskClick={handleTaskClick}
+              groupByAssignee={!filterAssignee}
             />
           ) : view === 'board' ? (
             <TasksBoardView
-              tasks={fullyFilteredTasks}
+              tasks={tasksWithCalculatedProgress}
               onTaskClick={handleTaskClick}
             />
           ) : (
             <TasksCalendarView
-              tasks={fullyFilteredTasks}
+              tasks={tasksWithCalculatedProgress}
               onTaskClick={handleTaskClick}
             />
           )}
@@ -823,6 +1158,7 @@ export default function HomePage() {
         users={users}
         currentUser={currentProfile}
         canEdit={canEditTasks}
+        defaultAssignee={filterAssignee}
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveTask}
         onDelete={handleDeleteTask}
