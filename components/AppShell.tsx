@@ -158,20 +158,36 @@ export function AppShell({
               Self evaluation
             </Link>
             {currentProfile?.role === 'admin' && (
-              <Link
-                href="/admin/assessment-periods"
-                style={{
-                  width: '100%',
-                  borderRadius: 10,
-                  padding: '8px 10px',
-                  fontSize: 13,
-                  color: '#475569',
-                  textDecoration: 'none',
-                  display: 'flex',
-                }}
-              >
-                Period setup
-              </Link>
+              <>
+                <Link
+                  href="/admin/assessment-periods"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Period setup
+                </Link>
+                <Link
+                  href="/admin/attendance-import"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Attendance/Leave Import
+                </Link>
+              </>
             )}
             {(currentProfile?.role === 'admin' ||
               currentProfile?.role === 'manager') && (

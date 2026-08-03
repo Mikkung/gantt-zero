@@ -14,7 +14,8 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "sass": "^1.69.0"
+    "sass": "^1.69.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "latest",
