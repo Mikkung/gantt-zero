@@ -2,11 +2,17 @@
 'use client';
 
 import 'frappe-gantt/dist/frappe-gantt.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 // @ts-ignore
 import Gantt from 'frappe-gantt';
 import { Task } from '../types';
 import { supabase } from '../utils/supabase';
+import {
+  calculateEffectiveWeightTotal,
+  formatNumber,
+  getEffectiveEvaluableTasks,
+  getPositiveWeight,
+} from '../utils/taskProgress';
 
 interface GanttProps {
   tasks: Task[];
@@ -15,6 +21,26 @@ interface GanttProps {
 }
 
 type ViewMode = 'Day' | 'Week' | 'Month';
+
+const GANTT_LEFT_PANE_STORAGE_KEY = 'gantt-left-pane-width';
+const GANTT_LEFT_PANE_DEFAULT_WIDTH = 300;
+const GANTT_LEFT_PANE_MIN_WIDTH = 220;
+const GANTT_LEFT_PANE_MAX_WIDTH = 600;
+
+function getMaxLeftPaneWidth() {
+  if (typeof window === 'undefined') return GANTT_LEFT_PANE_MAX_WIDTH;
+  return Math.min(
+    GANTT_LEFT_PANE_MAX_WIDTH,
+    Math.floor(window.innerWidth * 0.5),
+  );
+}
+
+function clampLeftPaneWidth(width: number) {
+  return Math.min(
+    Math.max(width, GANTT_LEFT_PANE_MIN_WIDTH),
+    getMaxLeftPaneWidth(),
+  );
+}
 
 // -------- helper: date utils --------
 function toDate(value: string | null | undefined): Date | null {
@@ -191,6 +217,7 @@ export default function GanttChart({
   onTaskClick,
 }: GanttProps) {
   const ganttRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -198,6 +225,18 @@ export default function GanttChart({
   const [collapsedParents, setCollapsedParents] = useState<Set<string>>(
     () => new Set(),
   );
+  const [leftPaneWidth, setLeftPaneWidth] = useState(() => {
+    if (typeof window === 'undefined') return GANTT_LEFT_PANE_DEFAULT_WIDTH;
+
+    const savedWidth = Number(
+      window.localStorage.getItem(GANTT_LEFT_PANE_STORAGE_KEY),
+    );
+
+    return Number.isFinite(savedWidth) && savedWidth > 0
+      ? clampLeftPaneWidth(savedWidth)
+      : GANTT_LEFT_PANE_DEFAULT_WIDTH;
+  });
+  const [isResizingLeftPane, setIsResizingLeftPane] = useState(false);
 
   // ใช้จำว่าเรา set default collapse ไปแล้วหรือยัง (กันทำซ้ำ)
   const initialCollapseAppliedRef = useRef(false);
@@ -221,6 +260,52 @@ export default function GanttChart({
     setViewFrom(formatInputDate(from));
     setViewTo(formatInputDate(to));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      GANTT_LEFT_PANE_STORAGE_KEY,
+      String(leftPaneWidth),
+    );
+  }, [leftPaneWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleResize = () => {
+      setLeftPaneWidth((current) => clampLeftPaneWidth(current));
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizingLeftPane) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const layoutRect = layoutRef.current?.getBoundingClientRect();
+      if (!layoutRect) return;
+
+      setLeftPaneWidth(clampLeftPaneWidth(event.clientX - layoutRect.left));
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingLeftPane(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingLeftPane]);
 
   // 1) filter งานตามช่วงวันที่
   //const dateFilteredTasks = useMemo(() => {
@@ -283,12 +368,20 @@ export default function GanttChart({
       const userInfo = byUser[userKey];
       const userRowId = `user:${userKey}`;
       const userCollapsed = collapsedParents.has(userRowId);
+      const visibleUserTasks = userInfo.tasks.filter((task) =>
+        workTypeFilter.includes(normalizeWorkType((task as any).work_type)),
+      );
+      const visibleUserEvaluableTasks = getEffectiveEvaluableTasks(
+        visibleUserTasks,
+      );
 
       rows.push({
         kind: 'user',
         id: userRowId,
         depth: 0,
-        label: userInfo.label,
+        label: `${userInfo.label} — รวม Weight: ${formatNumber(
+          calculateEffectiveWeightTotal(visibleUserTasks),
+        )}`,
         userKey,
       });
 
@@ -303,6 +396,11 @@ export default function GanttChart({
           const norm = normalizeWorkType((t as any).work_type);
           return norm === wt.value;
         });
+        const categoryEffectiveWeight = visibleUserEvaluableTasks
+          .filter(
+            (task) => normalizeWorkType((task as any).work_type) === wt.value,
+          )
+          .reduce((sum, task) => sum + getPositiveWeight(task.weight), 0);
 
         const catRowId = `cat:${userKey}:${wt.value}`;
         const catCollapsed = collapsedParents.has(catRowId);
@@ -312,7 +410,9 @@ export default function GanttChart({
             kind: 'category',
             id: catRowId,
             depth: 1,
-            label: wt.label,
+            label: `${wt.label} — รวม ${formatNumber(
+              categoryEffectiveWeight,
+            )}`,
             userKey,
             workType: wt.value,
           });
@@ -322,9 +422,13 @@ export default function GanttChart({
           continue;
         }
 
+        const catTaskIds = new Set(catTasksAll.map((t) => t.id));
         const childrenByParent: Record<string, Task[]> = {};
         catTasksAll.forEach((t) => {
-          const key = t.parent_id || 'root';
+          const key =
+            t.parent_id && catTaskIds.has(t.parent_id)
+              ? t.parent_id
+              : 'root';
           if (!childrenByParent[key]) childrenByParent[key] = [];
           childrenByParent[key].push(t);
         });
@@ -504,7 +608,7 @@ export default function GanttChart({
           name: buildTaskDisplayLabel(t),
           start: startStr,
           end: endStr,
-          progress: t.progress ?? 0,
+          progress: t.calculated_progress ?? t.progress ?? 0,
           dependencies: t.dependencies || '',
           custom_class: `status-${(t.status || '')
             .toLowerCase()
@@ -584,6 +688,10 @@ export default function GanttChart({
             <div style="display:flex;justify-content:space-between;color:#64748b;margin-bottom:2px">
               <span>Progress</span>
               <span style="font-weight:600;color:#0f172a">${task.progress || 0}%</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;color:#64748b;margin-bottom:2px">
+              <span>Weight</span>
+              <span style="font-weight:600;color:#0f172a">${original.weight || 0}</span>
             </div>
             ${
               original.assignee
@@ -920,7 +1028,15 @@ export default function GanttChart({
         </div>
       </div>
 
-      <div className="gantt-layout">
+      <div
+        className="gantt-layout"
+        ref={layoutRef}
+        style={
+          {
+            '--gantt-left-pane-width': `${leftPaneWidth}px`,
+          } as CSSProperties
+        }
+      >
         <div className="gantt-tree" ref={treeRef}>
           {treeRows.length ? (
             treeRows.map((row) => {
@@ -944,12 +1060,14 @@ export default function GanttChart({
               return (
                 <div key={row.id}>
                   <div
-                    className="gantt-tree-row"
+                    className={`gantt-tree-row gantt-tree-row-${row.kind}`}
                     style={{ paddingLeft: row.depth * 16 }}
                     onClick={onRowClick}
+                    title={row.label}
                   >
                     {hasChildren ? (
                       <span
+                        className="gantt-tree-toggle"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleCollapse(row.id);
@@ -958,9 +1076,9 @@ export default function GanttChart({
                         {isCollapsed ? '▶' : '▼'}
                       </span>
                     ) : (
-                      <span style={{ width: 12 }} />
+                      <span className="gantt-tree-toggle" />
                     )}
-                    <span>{row.label}</span>
+                    <span className="gantt-tree-row-label">{row.label}</span>
                   </div>
                 </div>
               );
@@ -971,6 +1089,23 @@ export default function GanttChart({
             </div>
           )}
         </div>
+
+        <div
+          className={`gantt-resize-handle${
+            isResizingLeftPane ? ' is-resizing' : ''
+          }`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize Gantt task labels"
+          title="Drag to resize. Double-click to reset."
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setIsResizingLeftPane(true);
+          }}
+          onDoubleClick={() =>
+            setLeftPaneWidth(clampLeftPaneWidth(GANTT_LEFT_PANE_DEFAULT_WIDTH))
+          }
+        />
 
         <div className="gantt-body" ref={bodyScrollRef}>
           <div ref={ganttRef} />

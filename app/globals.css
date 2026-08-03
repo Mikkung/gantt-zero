@@ -383,9 +383,10 @@ body.app-body {
 .gantt-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px minmax(0,1fr);
-  gap: 12px;
+  grid-template-columns: var(--gantt-left-pane-width, 300px) 8px minmax(0, 1fr);
+  gap: 0;
   min-height: 0;
+  min-width: 0;
 }
 
 .gantt-tree {
@@ -393,34 +394,93 @@ body.app-body {
   border: 1px solid #e2e8f0;
   border-right: none;
   background: #f8fafc;
-  padding: 58 10px; /**/
+  padding: 58px 10px 10px;
   overflow-y: hidden;
   overflow-x: hidden;
   font-size: 13px;
+  min-width: 0;
 }
 
 .gantt-tree-row {
   display: flex;
   align-items: center;
   gap: 6px;
-
   height: 42px;
   padding: 0px 4px;
   border-radius: 8px;
   cursor: pointer;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .gantt-tree-row:hover {
   background: #e2e8f0;
 }
 
+.gantt-tree-toggle {
+  flex: 0 0 12px;
+  width: 12px;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+
+.gantt-tree-row-label {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gantt-tree-row-user .gantt-tree-row-label {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.gantt-tree-row-category .gantt-tree-row-label {
+  font-weight: 600;
+  color: #8b2332;
+}
+
+.gantt-resize-handle {
+  position: relative;
+  cursor: col-resize;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.gantt-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  opacity: 0.75;
+}
+
+.gantt-resize-handle:hover,
+.gantt-resize-handle.is-resizing {
+  background: #e2e8f0;
+}
+
+.gantt-resize-handle:hover::before,
+.gantt-resize-handle.is-resizing::before {
+  background: #8b2332;
+  opacity: 1;
+}
+
 .gantt-body {
   position: relative;
-  border-radius: 12px;
+  border-radius: 0 12px 12px 0;
   overflow-x: auto;
   overflow-y: auto;
   border: 1px solid #e2e8f0;
   background: #ffffff;
+  min-width: 0;
 }
 
 .gantt-body::-webkit-scrollbar {

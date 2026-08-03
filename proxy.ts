@@ -11,7 +11,7 @@ const EXCLUDED_PATH_PREFIXES = [
 ];
 
 function isMaintenanceModeEnabled() {
-  return process.env.MAINTENANCE_MODE === 'true';
+  return process.env.MAINTENANCE_MODE === 'false';
 }
 
 function shouldBypassMaintenance(pathname: string) {
