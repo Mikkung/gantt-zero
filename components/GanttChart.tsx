@@ -13,6 +13,7 @@ import {
   getEffectiveEvaluableTasks,
   getPositiveWeight,
 } from '../utils/taskProgress';
+import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
 
 interface GanttProps {
   tasks: Task[];
@@ -671,6 +672,9 @@ export default function GanttChart({
 
         const startLabel = formatDate(task._start);
         const endLabel = formatDate(task._end);
+        const sourceLabel = getTaskSourceLabel(original);
+        const sourceColor = isOriginalAsTask(original) ? '#475569' : '#047857';
+        const sourceBg = isOriginalAsTask(original) ? '#f8fafc' : '#ecfdf5';
 
         return `
           <div style="
@@ -681,7 +685,12 @@ export default function GanttChart({
             padding:8px 10px;
             font-size:12px;
           ">
-            <div style="font-weight:600;color:#0f172a;margin-bottom:2px">${task.name}</div>
+            <div style="font-weight:600;color:#0f172a;margin-bottom:4px">${task.name}</div>
+            <div style="margin-bottom:4px">
+              <span style="display:inline-flex;border-radius:999px;border:1px solid #cbd5e1;background:${sourceBg};color:${sourceColor};padding:2px 7px;font-size:10px;font-weight:700">
+                ${sourceLabel}
+              </span>
+            </div>
             <div style="color:#64748b;margin-bottom:4px">
               ${startLabel} – ${endLabel}
             </div>

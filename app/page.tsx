@@ -18,6 +18,12 @@ import {
   groupTasksByAssigneeAndWorkType,
   groupTasksByWorkType,
 } from '../utils/taskGrouping';
+import {
+  filterTasksBySource,
+  getTaskSourceLabel,
+  isOriginalAsTask,
+  type TaskSourceFilter,
+} from '../utils/taskSource';
 import type { Task, Team, Profile, Role } from '../types';
 
 type ViewType = 'gantt' | 'list' | 'board' | 'calendar';
@@ -44,6 +50,8 @@ export default function HomePage() {
   const [filterDateRange, setFilterDateRange] = useState<
     'all' | 'thisWeek' | 'overdue'
   >('all');
+  const [filterTaskSource, setFilterTaskSource] =
+    useState<TaskSourceFilter>('all');
 
   const [loading, setLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
@@ -217,6 +225,7 @@ export default function HomePage() {
   // ========= สิทธิ์ของ role =========
   const canEditTasks =
     !!currentProfile && currentProfile.role !== 'manager';
+  const isAdmin = currentProfile?.role === 'admin';
 
   // ========= filters =========
   const roleFilteredTasks = useMemo(() => {
@@ -253,13 +262,18 @@ export default function HomePage() {
     });
   }, [roleFilteredTasks, filterDateRange]);
 
+  const sourceFilteredTasks = useMemo(
+    () => filterTasksBySource(timeFilteredTasks, filterTaskSource),
+    [timeFilteredTasks, filterTaskSource],
+  );
+
   const fullyFilteredTasks = useMemo(() => {
-    return timeFilteredTasks.filter((t) => {
+    return sourceFilteredTasks.filter((t) => {
       if (filterTeamId && t.team_id !== filterTeamId) return false;
       if (filterAssignee && t.assignee !== filterAssignee) return false;
       return true;
     });
-  }, [timeFilteredTasks, filterTeamId, filterAssignee]);
+  }, [sourceFilteredTasks, filterTeamId, filterAssignee]);
 
   const progressMetrics = useMemo(
     () => calculateTaskProgressMetrics(fullyFilteredTasks),
@@ -355,6 +369,30 @@ export default function HomePage() {
     return `รวม Weight: ${formatNumber(total)}`;
   };
 
+  const renderTaskSourceBadge = (task: Task) => (
+    <span
+      style={{
+        marginLeft: 8,
+        borderRadius: 999,
+        border: '1px solid #cbd5e1',
+        background:
+          task.task_source === 'as_original' || !task.task_source
+            ? '#f8fafc'
+            : '#ecfdf5',
+        color:
+          task.task_source === 'as_original' || !task.task_source
+            ? '#475569'
+            : '#047857',
+        padding: '2px 7px',
+        fontSize: 10,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {getTaskSourceLabel(task)}
+    </span>
+  );
+
   // ========= CRUD handlers =========
 
   const handleNewTask = () => {
@@ -405,6 +443,31 @@ export default function HomePage() {
       const parentTask = partial.parent_id
         ? tasks.find((task) => task.id === partial.parent_id)
         : null;
+      const isUserRole = currentProfile?.role === 'user';
+      const isCreating = !selectedTask;
+
+      if (
+        selectedTask &&
+        isUserRole &&
+        isOriginalAsTask(selectedTask) &&
+        !window.confirm(
+          'งานนี้เป็นงานต้นฉบับจาก AS และอาจถูกใช้ประกอบการประเมินผล หากต้องการแตกงานเพื่อจัดการรายละเอียด แนะนำให้เพิ่มเป็นงานย่อยแทนการแก้ไขงานต้นฉบับ ต้องการบันทึกการแก้ไขต่อหรือไม่?',
+        )
+      ) {
+        return;
+      }
+
+      if (isCreating && isUserRole) {
+        if (!parentTask || !isOriginalAsTask(parentTask)) {
+          alert('Please select your original AS task as the parent task.');
+          return;
+        }
+        if (parentTask.assignee !== currentProfile?.display_name) {
+          alert('You can add child tasks only under your own AS tasks.');
+          return;
+        }
+      }
+
       const defaultTeamId = roleCanSeeAll(currentProfile?.role)
         ? filterTeamId ?? currentProfile?.team_id ?? null
         : currentProfile?.team_id ?? null;
@@ -412,6 +475,23 @@ export default function HomePage() {
         parentTask?.team_id ??
         (partial as any).team_id ??
         defaultTeamId;
+      const effectiveAssignee =
+        isCreating && isUserRole
+          ? currentProfile?.display_name ?? parentTask?.assignee ?? normalizedAssignee
+          : normalizedAssignee;
+      const normalizedTaskSource = selectedTask
+        ? selectedTask.task_source ?? 'as_original'
+        : isAdmin
+          ? partial.task_source ?? 'admin_added'
+          : 'user_added';
+      const normalizedCountsTowardAssessment = selectedTask
+        ? selectedTask.counts_toward_assessment ?? true
+        : isAdmin
+          ? partial.counts_toward_assessment ?? true
+          : false;
+      const normalizedIncludeInAiSummary = selectedTask
+        ? selectedTask.include_in_ai_summary ?? true
+        : partial.include_in_ai_summary ?? true;
       let savedTaskForState: Task | null = null;
 
       if (selectedTask) {
@@ -419,9 +499,14 @@ export default function HomePage() {
         const { id, ...rest } = partial;
         const updatePayload = {
           ...rest,
-          assignee: normalizedAssignee,
+          assignee: effectiveAssignee,
           team_id: normalizedTeamId,
         };
+        if (!isAdmin) {
+          delete (updatePayload as any).task_source;
+          delete (updatePayload as any).counts_toward_assessment;
+          delete (updatePayload as any).include_in_ai_summary;
+        }
 
         const { error } = await supabase
           .from('tasks')
@@ -460,11 +545,14 @@ export default function HomePage() {
           status: partial.status ?? 'To Do',
           priority: partial.priority ?? 'Medium',
           progress: partial.progress ?? 0,
-          weight: partial.weight ?? 0,
+          weight:
+            normalizedCountsTowardAssessment === false
+              ? 0
+              : partial.weight ?? 0,
           calculated_progress: null,
           progress_summary: partial.progress_summary ?? null,
 
-          assignee: normalizedAssignee,
+          assignee: effectiveAssignee,
 
           is_recurring: partial.is_recurring ?? false,
           recurring_type: partial.is_recurring
@@ -481,6 +569,9 @@ export default function HomePage() {
 
           team_id: normalizedTeamId,
           parent_id: partial.parent_id ?? null,
+          task_source: normalizedTaskSource,
+          counts_toward_assessment: normalizedCountsTowardAssessment,
+          include_in_ai_summary: normalizedIncludeInAiSummary,
         };
 
         // work_type (routine / strategic / process / self / other)
@@ -544,6 +635,24 @@ export default function HomePage() {
   const handleDuplicateTask = async (task: Task) => {
     try {
       if (!canEditTasks) return;
+      const duplicateAsUserAdded = currentProfile?.role === 'user';
+      const originalParentTask =
+        duplicateAsUserAdded && isOriginalAsTask(task)
+          ? task
+          : duplicateAsUserAdded
+            ? tasks.find((candidate) => candidate.id === task.parent_id)
+            : null;
+
+      if (duplicateAsUserAdded) {
+        if (
+          !originalParentTask ||
+          !isOriginalAsTask(originalParentTask) ||
+          originalParentTask.assignee !== currentProfile?.display_name
+        ) {
+          alert('You can duplicate only into your own original AS task.');
+          return;
+        }
+      }
 
       const insertPayload: any = {
         name: `${task.name} (copy)`,
@@ -556,7 +665,9 @@ export default function HomePage() {
         priority: task.priority ?? 'Medium',
         progress: 0,
 
-        assignee: task.assignee ?? null,
+        assignee: duplicateAsUserAdded
+          ? currentProfile?.display_name ?? null
+          : task.assignee ?? null,
 
         is_recurring: task.is_recurring ?? false,
         recurring_type: task.is_recurring ? task.recurring_type ?? 'none' : 'none',
@@ -565,13 +676,20 @@ export default function HomePage() {
 
         dependencies: task.dependencies ?? '',
 
-        team_id: task.team_id ?? currentProfile?.team_id ?? null,
-        parent_id: task.parent_id ?? null,
+        team_id:
+          originalParentTask?.team_id ??
+          task.team_id ??
+          currentProfile?.team_id ??
+          null,
+        parent_id: originalParentTask?.id ?? task.parent_id ?? null,
 
         work_type: (task as any).work_type ?? 'routine',
-        weight: task.weight ?? 0,
+        weight: duplicateAsUserAdded ? 0 : task.weight ?? 0,
         calculated_progress: null,
         progress_summary: task.progress_summary ?? null,
+        task_source: isAdmin ? 'admin_added' : 'user_added',
+        counts_toward_assessment: isAdmin,
+        include_in_ai_summary: true,
       };
 
       const { error } = await supabase.from('tasks').insert(insertPayload);
@@ -655,6 +773,7 @@ export default function HomePage() {
             >
               {depth > 0 ? '↳ ' : ''}
               {t.name}
+              {renderTaskSourceBadge(t)}
             </td>
             <td style={{ padding: 6, textAlign: 'center' }}>
               {t.assignee}
@@ -881,7 +1000,10 @@ export default function HomePage() {
                         }}
                         onClick={() => onTaskClick(t)}
                       >
-                        <div style={{ fontWeight: 500 }}>{t.name}</div>
+                        <div style={{ fontWeight: 500 }}>
+                          {t.name}
+                          {renderTaskSourceBadge(t)}
+                        </div>
                         <div
                           style={{
                             fontSize: 11,
@@ -995,7 +1117,8 @@ export default function HomePage() {
                         }}
                         onClick={() => onTaskClick(t)}
                       >
-                        {t.name} ·{' '}
+                        {t.name}
+                        {renderTaskSourceBadge(t)} ·{' '}
                         {formatProgress(t.calculated_progress ?? t.progress)}
                       </div>
                     ))}
@@ -1019,8 +1142,10 @@ export default function HomePage() {
       users={users}
       activeTeamId={filterTeamId}
       activeAssignee={filterAssignee}
+      activeTaskSourceFilter={filterTaskSource}
       onSelectTeam={setFilterTeamId}
       onSelectAssignee={setFilterAssignee}
+      onSelectTaskSourceFilter={setFilterTaskSource}
       onFilterMyTasks={() => {
         if (!currentProfile) return;
         const found = users.find((u) => u.id === currentProfile.id);

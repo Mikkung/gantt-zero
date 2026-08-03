@@ -6,6 +6,7 @@ import type {
   AssessmentTaskSnapshot,
   ManagerEvaluationAssignment,
   Profile,
+  Task,
   TaskSelfEvaluation,
 } from '../../../../types';
 import {
@@ -203,7 +204,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const [periodResult, snapshotsResult, taskEvaluationsResult] =
+  const [periodResult, snapshotsResult, taskEvaluationsResult, tasksResult] =
     await Promise.all([
       supabase
         .from('assessment_periods')
@@ -220,6 +221,11 @@ export async function POST(request: NextRequest) {
         .select('*')
         .eq('period_id', periodId)
         .eq('employee_id', employeeId),
+      supabase
+        .from('tasks')
+        .select('*')
+        .eq('assignee', employeeId)
+        .eq('include_in_ai_summary', true),
     ]);
 
   if (periodResult.error) return jsonError(periodResult.error.message, 500);
@@ -227,11 +233,13 @@ export async function POST(request: NextRequest) {
   if (taskEvaluationsResult.error) {
     return jsonError(taskEvaluationsResult.error.message, 500);
   }
+  if (tasksResult.error) return jsonError(tasksResult.error.message, 500);
 
   const period = periodResult.data as AssessmentPeriod;
   const snapshots = (snapshotsResult.data ?? []) as AssessmentTaskSnapshot[];
   const taskEvaluations =
     (taskEvaluationsResult.data ?? []) as TaskSelfEvaluation[];
+  const supplementaryTasks = (tasksResult.data ?? []) as Task[];
   const sourceRows = getAiSummarySourceRows({
     snapshots,
     taskEvaluations,
@@ -243,6 +251,7 @@ export async function POST(request: NextRequest) {
     employeeId,
     snapshots,
     taskEvaluations,
+    supplementaryTasks,
     summaryScope,
     workType,
   });

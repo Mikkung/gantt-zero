@@ -4,6 +4,7 @@
 import { ReactNode, useState } from 'react';
 import Link from 'next/link';
 import type { Profile, Team } from '../types';
+import type { TaskSourceFilter } from '../utils/taskSource';
 
 type ViewType = 'gantt' | 'list' | 'board' | 'calendar';
 
@@ -22,8 +23,10 @@ interface AppShellProps {
   users: Profile[];
   activeTeamId: string | null;
   activeAssignee: string | null;
+  activeTaskSourceFilter: TaskSourceFilter;
   onSelectTeam: (teamId: string | null) => void;
   onSelectAssignee: (name: string | null) => void;
+  onSelectTaskSourceFilter: (filter: TaskSourceFilter) => void;
   onFilterMyTasks: () => void;
   onFilterThisWeek: () => void;
   onFilterOverdue: () => void;
@@ -43,8 +46,10 @@ export function AppShell({
   users,
   activeTeamId,
   activeAssignee,
+  activeTaskSourceFilter,
   onSelectTeam,
   onSelectAssignee,
+  onSelectTaskSourceFilter,
   onFilterMyTasks,
   onFilterThisWeek,
   onFilterOverdue,
@@ -136,6 +141,17 @@ export function AppShell({
             >
               Overdue
             </button>
+            <select
+              className="filter-select"
+              value={activeTaskSourceFilter}
+              onChange={(event) =>
+                onSelectTaskSourceFilter(event.target.value as TaskSourceFilter)
+              }
+            >
+              <option value="all">ทั้งหมด</option>
+              <option value="as_original">งานจาก AS</option>
+              <option value="added">งานที่เพิ่มเอง</option>
+            </select>
           </div>
         </div>
 

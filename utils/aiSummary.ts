@@ -1,6 +1,7 @@
 import type {
   AssessmentPeriod,
   AssessmentTaskSnapshot,
+  Task,
   TaskSelfEvaluation,
 } from '../types';
 import {
@@ -9,6 +10,10 @@ import {
   getEvaluationTaskName,
   getEvaluationTaskWeight,
 } from './evaluationTasks';
+import {
+  countsTowardAssessment,
+  shouldIncludeInAiSummary,
+} from './taskSource';
 
 export type AiSummaryScope = 'employee_workload' | 'work_type';
 
@@ -17,6 +22,7 @@ type BuildAiSummaryPromptArgs = {
   employeeId: string;
   snapshots: AssessmentTaskSnapshot[];
   taskEvaluations: TaskSelfEvaluation[];
+  supplementaryTasks?: Task[];
   summaryScope: AiSummaryScope;
   workType?: string | null;
 };
@@ -70,8 +76,53 @@ export function getAiSummarySourceRows({
   });
 }
 
+export function getAiSummarySupplementaryTaskRows({
+  snapshots,
+  supplementaryTasks = [],
+  summaryScope,
+  workType,
+}: Pick<
+  BuildAiSummaryPromptArgs,
+  'snapshots' | 'supplementaryTasks' | 'summaryScope' | 'workType'
+>) {
+  const officialTaskIds = new Set(snapshots.map((snapshot) => snapshot.task_id));
+  const workTypeOfficialTaskIds =
+    summaryScope === 'work_type' && workType
+      ? new Set(
+          snapshots
+            .filter((snapshot) => snapshot.work_type === workType)
+            .map((snapshot) => snapshot.task_id),
+        )
+      : officialTaskIds;
+
+  return supplementaryTasks
+    .filter((task) => !countsTowardAssessment(task))
+    .filter(shouldIncludeInAiSummary)
+    .filter((task) => {
+      if (summaryScope !== 'work_type' || !workType) return true;
+      return (
+        task.work_type === workType ||
+        workTypeOfficialTaskIds.has(task.parent_id ?? '')
+      );
+    })
+    .map((task) => ({
+      task_id: task.id,
+      task_name: task.name,
+      parent_id: task.parent_id,
+      parent_is_official_as_task: officialTaskIds.has(task.parent_id ?? ''),
+      task_source: task.task_source ?? 'user_added',
+      work_type: task.work_type,
+      status: task.status,
+      priority: task.priority,
+      progress: task.progress,
+      progress_summary: task.progress_summary,
+      description: task.description,
+    }));
+}
+
 export function buildAiSummaryPrompt(args: BuildAiSummaryPromptArgs) {
   const sourceRows = getAiSummarySourceRows(args);
+  const supplementaryRows = getAiSummarySupplementaryTaskRows(args);
   const scopeText =
     args.summaryScope === 'work_type'
       ? `work_type: ${args.workType ?? '-'}`
@@ -84,8 +135,13 @@ export function buildAiSummaryPrompt(args: BuildAiSummaryPromptArgs) {
     `Employee: ${args.employeeId}`,
     `Summary scope: ${scopeText}`,
     '',
-    'Task rows:',
+    'Official AS Tasks:',
     JSON.stringify(sourceRows, null, 2),
+    '',
+    'Additional User-Added Tasks / Supporting Evidence:',
+    JSON.stringify(supplementaryRows, null, 2),
+    '',
+    'User-added tasks are supplementary evidence only and must not change official assessment scores.',
     '',
     'รูปแบบคำตอบที่ต้องการ:',
     '- ภาพรวมความคืบหน้า:',

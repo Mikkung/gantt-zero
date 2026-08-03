@@ -9,6 +9,7 @@ import {
   getSubmissionStatusLabel,
 } from '../../../../../utils/scoring';
 import { supabase } from '../../../../../utils/supabase';
+import { countsTowardAssessment } from '../../../../../utils/taskSource';
 import type {
   AssessmentPeriod,
   AssessmentTaskSnapshot,
@@ -279,6 +280,7 @@ export default function SelfEvaluationSubmissionsAdminPage() {
       const rows = existingSnapshots.flatMap((snapshot) => {
         const task = taskById.get(snapshot.task_id);
         if (!task) return [];
+        if (!countsTowardAssessment(task)) return [];
 
         return [
           {
@@ -301,6 +303,7 @@ export default function SelfEvaluationSubmissionsAdminPage() {
 
       for (const task of latestTasks) {
         if (!task.assignee) continue;
+        if (!countsTowardAssessment(task)) continue;
 
         const key = `${task.assignee}:${task.id}`;
         if (snapshotKeys.has(key)) continue;
