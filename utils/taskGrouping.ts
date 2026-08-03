@@ -1,4 +1,10 @@
 import type { Task, WorkType } from '../types';
+import {
+  calculateAssigneeWeightSummary,
+  calculateEffectiveWeightTotal,
+  getEffectiveEvaluableTasks,
+  getPositiveWeight,
+} from './taskProgress';
 
 export const UNSPECIFIED_WORK_TYPE = '__unspecified__';
 
@@ -40,17 +46,30 @@ export function sortWorkTypes(types: WorkTypeKey[]) {
 
 export function groupTasksByWorkType(tasks: Task[]) {
   const groups = new Map<WorkTypeKey, Task[]>();
+  const evaluableTasks = getEffectiveEvaluableTasks(tasks);
 
   for (const task of tasks) {
     const key = normalizeWorkType(task.work_type);
     groups.set(key, [...(groups.get(key) ?? []), task]);
   }
 
-  return sortWorkTypes(Array.from(groups.keys())).map((workType) => ({
-    workType,
-    label: getWorkTypeLabel(workType),
-    tasks: groups.get(workType) ?? [],
-  }));
+  return sortWorkTypes(Array.from(groups.keys())).map((workType) => {
+    const groupTasks = groups.get(workType) ?? [];
+    const groupEvaluableTasks = evaluableTasks.filter(
+      (task) => normalizeWorkType(task.work_type) === workType,
+    );
+
+    return {
+      workType,
+      label: getWorkTypeLabel(workType),
+      tasks: groupTasks,
+      effectiveWeightTotal: groupEvaluableTasks.reduce(
+        (sum, task) => sum + getPositiveWeight(task.weight),
+        0,
+      ),
+      ...calculateAssigneeWeightSummary(groupEvaluableTasks),
+    };
+  });
 }
 
 export function groupTasksByAssigneeAndWorkType(tasks: Task[]) {
@@ -65,6 +84,8 @@ export function groupTasksByAssigneeAndWorkType(tasks: Task[]) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([assignee, assigneeTasks]) => ({
       assignee,
+      effectiveWeightTotal: calculateEffectiveWeightTotal(assigneeTasks),
+      ...calculateAssigneeWeightSummary(assigneeTasks),
       workTypeGroups: groupTasksByWorkType(assigneeTasks),
     }));
 }

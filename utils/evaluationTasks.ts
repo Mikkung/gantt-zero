@@ -1,4 +1,5 @@
 import type { AssessmentTaskSnapshot, Task, WorkType } from '../types';
+import { getPositiveWeight } from './taskProgress';
 import {
   getWorkTypeLabel,
   normalizeWorkType,
@@ -27,8 +28,7 @@ export function getEvaluationTaskName(task: EvaluationTaskLike) {
 }
 
 export function getEvaluationTaskWeight(task: EvaluationTaskLike) {
-  const value = Number(task.weight ?? 0);
-  return Number.isFinite(value) ? value : 0;
+  return getPositiveWeight(task.weight);
 }
 
 export function getEvaluationTaskWorkType(task: EvaluationTaskLike) {
@@ -87,6 +87,46 @@ export function getDirectChildren<T extends EvaluationTaskLike>(
   return tasks.filter((task) => task.parent_id === parentId);
 }
 
+export function getWeightedDirectChildren<T extends EvaluationTaskLike>(
+  task: T,
+  allTasks: T[],
+) {
+  const taskId = getEvaluationTaskIdentity(task);
+  if (!taskId) return [];
+
+  return getDirectChildren(allTasks, taskId).filter(
+    (child) => getEvaluationTaskWeight(child) > 0,
+  );
+}
+
+export function getEffectiveEvaluationTaskWeight<T extends EvaluationTaskLike>(
+  task: T,
+  allTasks: T[],
+): number {
+  const taskId = getEvaluationTaskIdentity(task);
+  const children = taskId ? getDirectChildren(allTasks, taskId) : [];
+  const childTotal = children.reduce(
+    (sum, child) => sum + getEffectiveEvaluationTaskWeight(child, allTasks),
+    0,
+  );
+
+  if (childTotal > 0) return childTotal;
+
+  return getEvaluationTaskWeight(task);
+}
+
+export function getEffectiveEvaluationChildWeightTotal<
+  T extends EvaluationTaskLike,
+>(task: T, allTasks: T[]): number {
+  const taskId = getEvaluationTaskIdentity(task);
+  if (!taskId) return 0;
+
+  return getDirectChildren(allTasks, taskId).reduce(
+    (sum, child) => sum + getEffectiveEvaluationTaskWeight(child, allTasks),
+    0,
+  );
+}
+
 export function hasDirectChildren<T extends EvaluationTaskLike>(
   task: T,
   allTasks: T[],
@@ -101,7 +141,9 @@ export function isEvaluableTask<T extends EvaluationTaskLike>(
   task: T,
   allTasks: T[],
 ) {
-  return getEvaluationTaskWeight(task) > 0 && !hasDirectChildren(task, allTasks);
+  if (getEvaluationTaskWeight(task) <= 0) return false;
+  if (!hasDirectChildren(task, allTasks)) return true;
+  return getEffectiveEvaluationChildWeightTotal(task, allTasks) <= 0;
 }
 
 export function getEvaluableTasks<T extends EvaluationTaskLike>(tasks: T[]) {

@@ -281,6 +281,27 @@ export default function HomePage() {
     [fullyFilteredTasks],
   );
 
+  const visibleAssignees = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          fullyFilteredTasks
+            .map((task) => task.assignee?.trim())
+            .filter((assignee): assignee is string => !!assignee),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [fullyFilteredTasks],
+  );
+
+  const weightTargetValue =
+    workloadSummary.visibleAssigneeCount > 0
+      ? workloadSummary.averageEffectiveWeightPerAssignee
+      : workloadSummary.totalScoreableWeight;
+  const shouldShowWeightTargetWarning =
+    workloadSummary.scoreableTaskCount > 0 &&
+    weightTargetValue !== null &&
+    Math.abs(weightTargetValue - 100) > 0.01;
+
   // tasks ที่ไม่มีลูก = leaf tasks (งานจริง)
   const leafTasks = useMemo(() => {
     const parentIds = new Set(
@@ -319,6 +340,20 @@ export default function HomePage() {
   }, [fullyFilteredTasks]);
 
   const totalLabel = summary.total === 1 ? 'task' : 'tasks';
+
+  const formatWeightGroupSummary = (
+    total: number,
+    assigneeCount?: number,
+    averagePerAssignee?: number | null,
+  ) => {
+    if (assigneeCount && assigneeCount > 1 && typeof averagePerAssignee === 'number') {
+      return `รวม Weight: ${formatNumber(total)} | เฉลี่ย/คน: ${formatNumber(
+        averagePerAssignee,
+      )}`;
+    }
+
+    return `รวม Weight: ${formatNumber(total)}`;
+  };
 
   // ========= CRUD handlers =========
 
@@ -594,15 +629,6 @@ export default function HomePage() {
       () => calculateTaskProgressMetrics(tasks),
       [tasks],
     );
-    const parentIds = useMemo(
-      () =>
-        new Set(
-          tasks
-            .filter((task) => task.parent_id)
-            .map((task) => task.parent_id as string),
-        ),
-      [tasks],
-    );
     const assigneeGroups = useMemo(
       () => groupTasksByAssigneeAndWorkType(tasks),
       [tasks],
@@ -612,7 +638,7 @@ export default function HomePage() {
     const renderTaskRows = (groupTasks: Task[]) =>
       getHierarchicalTaskRows(groupTasks).map(({ task: t, depth }) => {
         const metric = listMetrics[t.id];
-        const isParent = parentIds.has(t.id);
+        const isParent = metric?.isParent ?? false;
 
         return (
           <tr
@@ -635,7 +661,10 @@ export default function HomePage() {
             </td>
             <td style={{ padding: 6, textAlign: 'center' }}>{t.status}</td>
             <td style={{ padding: 6, textAlign: 'center' }}>
-              {formatNumber(metric?.weight ?? 0)}
+              <div>{formatNumber(metric?.displayWeight ?? 0)}</div>
+              {metric?.isComputedWeight && (
+                <div style={{ fontSize: 10, color: '#64748b' }}>คำนวณ</div>
+              )}
             </td>
             <td style={{ padding: 6, textAlign: 'center' }}>
               {formatProgress(metric?.displayProgress)}
@@ -693,7 +722,12 @@ export default function HomePage() {
                         fontWeight: 700,
                       }}
                     >
-                      {assigneeGroup.assignee}
+                      {assigneeGroup.assignee} —{' '}
+                      {formatWeightGroupSummary(
+                        assigneeGroup.effectiveWeightTotal,
+                        assigneeGroup.visibleAssigneeCount,
+                        assigneeGroup.averageEffectiveWeightPerAssignee,
+                      )}
                     </td>
                   </tr>,
                   ...assigneeGroup.workTypeGroups.flatMap((workTypeGroup) => [
@@ -709,7 +743,12 @@ export default function HomePage() {
                           fontWeight: 600,
                         }}
                       >
-                        ประเภทงาน: {workTypeGroup.label}
+                        ประเภทงาน: {workTypeGroup.label} —{' '}
+                        {formatWeightGroupSummary(
+                          workTypeGroup.effectiveWeightTotal,
+                          workTypeGroup.visibleAssigneeCount,
+                          workTypeGroup.averageEffectiveWeightPerAssignee,
+                        )}
                       </td>
                     </tr>,
                     ...renderTaskRows(workTypeGroup.tasks),
@@ -726,7 +765,12 @@ export default function HomePage() {
                         fontWeight: 600,
                       }}
                     >
-                      ประเภทงาน: {workTypeGroup.label}
+                      ประเภทงาน: {workTypeGroup.label} —{' '}
+                      {formatWeightGroupSummary(
+                        workTypeGroup.effectiveWeightTotal,
+                        workTypeGroup.visibleAssigneeCount,
+                        workTypeGroup.averageEffectiveWeightPerAssignee,
+                      )}
                     </td>
                   </tr>,
                   ...renderTaskRows(workTypeGroup.tasks),
@@ -810,7 +854,12 @@ export default function HomePage() {
                       marginBottom: 4,
                     }}
                   >
-                    ประเภทงาน: {workTypeGroup.label}
+                    ประเภทงาน: {workTypeGroup.label} —{' '}
+                    {formatWeightGroupSummary(
+                      workTypeGroup.effectiveWeightTotal,
+                      workTypeGroup.visibleAssigneeCount,
+                      workTypeGroup.averageEffectiveWeightPerAssignee,
+                    )}
                   </div>
                   <div
                     style={{
@@ -925,7 +974,12 @@ export default function HomePage() {
                       marginBottom: 4,
                     }}
                   >
-                    ประเภทงาน: {workTypeGroup.label}
+                    ประเภทงาน: {workTypeGroup.label} —{' '}
+                    {formatWeightGroupSummary(
+                      workTypeGroup.effectiveWeightTotal,
+                      workTypeGroup.visibleAssigneeCount,
+                      workTypeGroup.averageEffectiveWeightPerAssignee,
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {workTypeGroup.tasks.map((t) => (
@@ -1026,15 +1080,29 @@ export default function HomePage() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             gap: 12,
             marginBottom: 18,
           }}
         >
           <div className="summary-card">
-            <div className="summary-title">Total scoreable task weight</div>
+            <div className="summary-title">Total visible weight</div>
             <div className="summary-value">
               {formatNumber(workloadSummary.totalScoreableWeight)}
+            </div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-title">Assignees</div>
+            <div className="summary-value">
+              {workloadSummary.visibleAssigneeCount}
+            </div>
+          </div>
+          <div className="summary-card">
+            <div className="summary-title">Avg weight / person</div>
+            <div className="summary-value">
+              {workloadSummary.averageEffectiveWeightPerAssignee === null
+                ? '-'
+                : formatNumber(workloadSummary.averageEffectiveWeightPerAssignee)}
             </div>
           </div>
           <div className="summary-card">
@@ -1063,25 +1131,48 @@ export default function HomePage() {
           </div>
         </div>
 
-        {workloadSummary.scoreableTaskCount > 0 &&
-          Math.abs(workloadSummary.totalScoreableWeight - 100) > 0.01 && (
-            <div
-              style={{
-                marginTop: -8,
-                marginBottom: 14,
-                borderRadius: 10,
-                border: '1px solid #fed7aa',
-                background: '#fffbeb',
-                color: '#92400e',
-                padding: '8px 10px',
-                fontSize: 12,
-              }}
-            >
-              รวมน้ำหนักงานที่ใช้คำนวณขณะนี้คือ{' '}
-              {formatNumber(workloadSummary.totalScoreableWeight)} แนะนำให้รวมเป็น
-              100
-            </div>
-          )}
+        {shouldShowWeightTargetWarning && weightTargetValue !== null && (
+          <div
+            style={{
+              marginTop: -8,
+              marginBottom: 14,
+              borderRadius: 10,
+              border: '1px solid #fed7aa',
+              background: '#fffbeb',
+              color: '#92400e',
+              padding: '8px 10px',
+              fontSize: 12,
+            }}
+          >
+            {workloadSummary.visibleAssigneeCount > 1
+              ? `ค่าเฉลี่ยน้ำหนักงานต่อคนขณะนี้คือ ${formatNumber(
+                  weightTargetValue,
+                )} แนะนำให้ใกล้ 100`
+              : `รวมน้ำหนักงานของ ${
+                  visibleAssignees[0] ?? 'Unassigned'
+                } ขณะนี้คือ ${formatNumber(
+                  weightTargetValue,
+                )} แนะนำให้เป็น 100`}
+          </div>
+        )}
+
+        {workloadSummary.unassignedTaskCount > 0 && (
+          <div
+            style={{
+              marginTop: -8,
+              marginBottom: 14,
+              borderRadius: 10,
+              border: '1px solid #e2e8f0',
+              background: '#f8fafc',
+              color: '#475569',
+              padding: '8px 10px',
+              fontSize: 12,
+            }}
+          >
+            มีงานที่ยังไม่ระบุผู้รับผิดชอบ {workloadSummary.unassignedTaskCount}{' '}
+            รายการ จึงไม่นำไปรวมในค่าเฉลี่ยต่อคน
+          </div>
+        )}
 
         {workloadSummary.parentChildWeightWarnings.length > 0 && (
           <div
@@ -1101,10 +1192,9 @@ export default function HomePage() {
           >
             {workloadSummary.parentChildWeightWarnings.map((warning) => (
               <div key={warning.taskId}>
-                น้ำหนักของงานหลัก {warning.taskName}{' '}
-                ไม่เท่ากับผลรวมงานย่อย (
-                {formatNumber(warning.parentWeight)} ≠{' '}
-                {formatNumber(warning.childrenWeight)})
+                งานหลัก "{warning.taskName}" มี weight ={' '}
+                {formatNumber(warning.parentWeight)} แต่ผลรวมงานย่อย ={' '}
+                {formatNumber(warning.childrenWeight)}
               </div>
             ))}
           </div>
