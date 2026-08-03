@@ -44,6 +44,7 @@ export type LeaveNormalizedRow = {
   source_emp_id: string | null;
   employee_name: string | null;
   round: string | null;
+  leave_month: string | null;
   request_date: string | null;
   leave_type_code: string | null;
   leave_type_name: string | null;
@@ -51,6 +52,7 @@ export type LeaveNormalizedRow = {
   start_date: string | null;
   end_date: string | null;
   total_days: number | null;
+  approved_date: string | null;
   reason: string | null;
   attachment_url: string | null;
   handover_note: string | null;
@@ -82,25 +84,16 @@ export const ATTENDANCE_REQUIRED_COLUMNS = [
 ];
 
 export const LEAVE_REQUIRED_COLUMNS = [
-  'leave_id',
-  'emp_id',
-  'emp_name',
+  'ID',
+  'Name',
+  'LeaveType',
+  'Month',
+  'StartDate',
+  'EndDate',
+  'Days',
+  'Status',
+  'ApprovedDate',
   'Round',
-  'request_date',
-  'leave_type_code',
-  'leave_type_name',
-  'duration_type',
-  'start_date',
-  'end_date',
-  'total_days',
-  'reason',
-  'attachment_url',
-  'handover_note',
-  'record_status',
-  'cancel_reason',
-  'cancelled_at',
-  'form_status',
-  'form_file_url',
 ];
 
 export function isSupportedAttendanceImportFile(fileName: string) {
@@ -361,29 +354,25 @@ export function validateLeaveRows(
     missingColumns,
     rows: rows.map((row, index) => {
       const errors: string[] = [];
-      const requestDate = toDateString(getValue(row, 'request_date'));
-      const startDate = toDateString(getValue(row, 'start_date'));
-      const endDate = toDateString(getValue(row, 'end_date'));
-      const cancelledAt = toDateTimeString(getValue(row, 'cancelled_at'));
-      const totalDaysRaw = getValue(row, 'total_days');
+      const startDate = toDateString(getValue(row, 'StartDate'));
+      const endDate = toDateString(getValue(row, 'EndDate'));
+      const approvedDate = toDateString(getValue(row, 'ApprovedDate'));
+      const totalDaysRaw = getValue(row, 'Days');
       const totalDays = toNumberOrNull(totalDaysRaw);
-      const sourceEmpId = toText(getValue(row, 'emp_id'));
-      const employeeName = toText(getValue(row, 'emp_name'));
+      const sourceEmpId = toText(getValue(row, 'ID'));
+      const employeeName = toText(getValue(row, 'Name'));
 
-      if (toText(getValue(row, 'request_date')) && !requestDate) {
-        errors.push('Invalid request_date');
+      if (toText(getValue(row, 'StartDate')) && !startDate) {
+        errors.push('Invalid StartDate');
       }
-      if (toText(getValue(row, 'start_date')) && !startDate) {
-        errors.push('Invalid start_date');
+      if (toText(getValue(row, 'EndDate')) && !endDate) {
+        errors.push('Invalid EndDate');
       }
-      if (toText(getValue(row, 'end_date')) && !endDate) {
-        errors.push('Invalid end_date');
-      }
-      if (toText(getValue(row, 'cancelled_at')) && !cancelledAt) {
-        errors.push('Invalid cancelled_at');
+      if (toText(getValue(row, 'ApprovedDate')) && !approvedDate) {
+        errors.push('Invalid ApprovedDate');
       }
       if (toText(totalDaysRaw) && totalDays === null) {
-        errors.push('Invalid total_days');
+        errors.push('Invalid Days');
       }
 
       const match = matchEmployee(
@@ -400,25 +389,27 @@ export function validateLeaveRows(
         normalized: errors.length
           ? null
           : {
-              leave_id: toText(getValue(row, 'leave_id')),
+              leave_id: null,
               source_emp_id: sourceEmpId,
               employee_name: employeeName,
               round: toText(getValue(row, 'Round')),
-              request_date: requestDate,
-              leave_type_code: toText(getValue(row, 'leave_type_code')),
-              leave_type_name: toText(getValue(row, 'leave_type_name')),
-              duration_type: toText(getValue(row, 'duration_type')),
+              leave_month: toText(getValue(row, 'Month')),
+              request_date: null,
+              leave_type_code: null,
+              leave_type_name: toText(getValue(row, 'LeaveType')),
+              duration_type: null,
               start_date: startDate,
               end_date: endDate,
               total_days: totalDays,
-              reason: toText(getValue(row, 'reason')),
-              attachment_url: toText(getValue(row, 'attachment_url')),
-              handover_note: toText(getValue(row, 'handover_note')),
-              record_status: toText(getValue(row, 'record_status')),
-              cancel_reason: toText(getValue(row, 'cancel_reason')),
-              cancelled_at: cancelledAt,
-              form_status: toText(getValue(row, 'form_status')),
-              form_file_url: toText(getValue(row, 'form_file_url')),
+              approved_date: approvedDate,
+              reason: null,
+              attachment_url: null,
+              handover_note: null,
+              record_status: toText(getValue(row, 'Status')),
+              cancel_reason: null,
+              cancelled_at: null,
+              form_status: null,
+              form_file_url: null,
               raw_row: row,
               match,
             },
@@ -445,4 +436,3 @@ export function summarizeMatches<T extends { match: EmployeeMatch }>(
     ).length,
   };
 }
-

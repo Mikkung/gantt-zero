@@ -38,18 +38,22 @@ function formatError(error: unknown, fallback: string) {
 function PreviewTable({
   title,
   rows,
+  columns: preferredColumns,
 }: {
   title: string;
   rows: ValidationRow<AttendanceNormalizedRow | LeaveNormalizedRow>[];
+  columns?: string[];
 }) {
   const previewRows = rows.slice(0, 20);
   const columns = useMemo(() => {
+    if (preferredColumns?.length) return preferredColumns;
+
     const keys = new Set<string>();
     previewRows.forEach((row) =>
       Object.keys(row.raw).forEach((key) => keys.add(key)),
     );
     return Array.from(keys).slice(0, 10);
-  }, [previewRows]);
+  }, [preferredColumns, previewRows]);
 
   return (
     <div style={{ overflow: 'auto' }}>
@@ -449,6 +453,7 @@ export default function AttendanceImportPage() {
             source_emp_id: row.source_emp_id,
             employee_name: row.employee_name,
             round: row.round,
+            leave_month: row.leave_month,
             request_date: row.request_date,
             leave_type_code: row.leave_type_code,
             leave_type_name: row.leave_type_name,
@@ -456,6 +461,7 @@ export default function AttendanceImportPage() {
             start_date: row.start_date,
             end_date: row.end_date,
             total_days: row.total_days,
+            approved_date: row.approved_date,
             reason: row.reason,
             attachment_url: row.attachment_url,
             handover_note: row.handover_note,
@@ -710,11 +716,19 @@ export default function AttendanceImportPage() {
             <section className="summary-card" style={{ background: '#ffffff' }}>
               <h2 style={{ margin: '0 0 12px', fontSize: 16 }}>Preview</h2>
               {includesAttendance && (
-                <PreviewTable title="Attendance preview" rows={attendanceValidation.rows} />
+                <PreviewTable
+                  title="Attendance preview"
+                  rows={attendanceValidation.rows}
+                  columns={ATTENDANCE_REQUIRED_COLUMNS}
+                />
               )}
               {includesLeave && (
                 <div style={{ marginTop: includesAttendance ? 18 : 0 }}>
-                  <PreviewTable title="Leave preview" rows={leaveValidation.rows} />
+                  <PreviewTable
+                    title="Leave preview"
+                    rows={leaveValidation.rows}
+                    columns={LEAVE_REQUIRED_COLUMNS}
+                  />
                 </div>
               )}
             </section>
@@ -724,4 +738,3 @@ export default function AttendanceImportPage() {
     </main>
   );
 }
-
