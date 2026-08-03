@@ -158,37 +158,85 @@ export function AppShell({
               Self evaluation
             </Link>
             {currentProfile?.role === 'admin' && (
-              <Link
-                href="/admin/assessment-periods"
-                style={{
-                  width: '100%',
-                  borderRadius: 10,
-                  padding: '8px 10px',
-                  fontSize: 13,
-                  color: '#475569',
-                  textDecoration: 'none',
-                  display: 'flex',
-                }}
-              >
-                Period setup
-              </Link>
+              <>
+                <Link
+                  href="/admin/assessment-periods"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Period setup
+                </Link>
+                <Link
+                  href="/admin/attendance-import"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Attendance/Leave Import
+                </Link>
+                <Link
+                  href="/admin/attendance-dashboard"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Attendance Dashboard
+                </Link>
+              </>
             )}
             {(currentProfile?.role === 'admin' ||
               currentProfile?.role === 'manager') && (
-              <Link
-                href="/manager/evaluations"
-                style={{
-                  width: '100%',
-                  borderRadius: 10,
-                  padding: '8px 10px',
-                  fontSize: 13,
-                  color: '#475569',
-                  textDecoration: 'none',
-                  display: 'flex',
-                }}
-              >
-                Manager evaluation
-              </Link>
+              <>
+                <Link
+                  href="/manager/evaluations"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Manager evaluation
+                </Link>
+                {currentProfile?.role === 'manager' && (
+                  <Link
+                    href="/manager/attendance-dashboard"
+                    style={{
+                      width: '100%',
+                      borderRadius: 10,
+                      padding: '8px 10px',
+                      fontSize: 13,
+                      color: '#475569',
+                      textDecoration: 'none',
+                      display: 'flex',
+                    }}
+                  >
+                    Attendance Dashboard
+                  </Link>
+                )}
+              </>
             )}
           </div>
         </div>
