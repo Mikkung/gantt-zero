@@ -35,6 +35,18 @@ export type AttendanceNormalizedRow = {
   late_time: number | null;
   late_check: string | null;
   late_note: string | null;
+  reason: string | null;
+  location: string | null;
+  coords: string | null;
+  timestamp_id: string | null;
+  source_timestamp: string | null;
+  session_id: string | null;
+  source_email: string | null;
+  device_id: string | null;
+  attendance_status: string | null;
+  attendance_remark: string | null;
+  finalized_at: string | null;
+  leave_type: string | null;
   raw_row: AttendanceSourceRow;
   match: EmployeeMatch;
 };
@@ -73,14 +85,25 @@ export type ValidationRow<T> = {
 };
 
 export const ATTENDANCE_REQUIRED_COLUMNS = [
-  'ID',
-  'Date',
-  'Name',
-  'CheckIn',
-  'CheckOut',
-  'LateTime',
-  'LateCheck',
-  'LateNote',
+  'emp_id',
+  'date',
+  'emp_name',
+  'checkin_time',
+  'checkout_time',
+  'latetime',
+  'latecheck',
+  'reason',
+  'location',
+  'coords',
+  'timestamp_id',
+  'timestamp',
+  'session_id',
+  'source_email',
+  'device_id',
+  'attendance_status',
+  'attendance_remark',
+  'finalized_at',
+  'leave_type',
 ];
 
 export const LEAVE_REQUIRED_COLUMNS = [
@@ -296,17 +319,28 @@ export function validateAttendanceRows(
     missingColumns,
     rows: rows.map((row, index) => {
       const errors: string[] = [];
-      const attendanceDate = toDateString(getValue(row, 'Date'));
-      const lateTimeRaw = getValue(row, 'LateTime');
+      const attendanceDateRaw = getValue(row, 'date');
+      const attendanceDate = toDateString(attendanceDateRaw);
+      const lateTimeRaw = getValue(row, 'latetime');
       const lateTime = toNumberOrNull(lateTimeRaw);
-      const sourceId = toText(getValue(row, 'ID'));
-      const employeeName = toText(getValue(row, 'Name'));
+      const sourceTimestampRaw = getValue(row, 'timestamp');
+      const sourceTimestamp = toDateTimeString(sourceTimestampRaw);
+      const finalizedAtRaw = getValue(row, 'finalized_at');
+      const finalizedAt = toDateTimeString(finalizedAtRaw);
+      const sourceId = toText(getValue(row, 'emp_id'));
+      const employeeName = toText(getValue(row, 'emp_name'));
 
-      if (toText(getValue(row, 'Date')) && !attendanceDate) {
-        errors.push('Invalid Date');
+      if (toText(attendanceDateRaw) && !attendanceDate) {
+        errors.push('Invalid date');
       }
       if (toText(lateTimeRaw) && lateTime === null) {
-        errors.push('Invalid LateTime');
+        errors.push('Invalid latetime');
+      }
+      if (toText(sourceTimestampRaw) && !sourceTimestamp) {
+        errors.push('Invalid timestamp');
+      }
+      if (toText(finalizedAtRaw) && !finalizedAt) {
+        errors.push('Invalid finalized_at');
       }
 
       const match = matchEmployee(
@@ -326,11 +360,23 @@ export function validateAttendanceRows(
               source_id: sourceId,
               attendance_date: attendanceDate,
               employee_name: employeeName,
-              check_in: toText(getValue(row, 'CheckIn')),
-              check_out: toText(getValue(row, 'CheckOut')),
+              check_in: toText(getValue(row, 'checkin_time')),
+              check_out: toText(getValue(row, 'checkout_time')),
               late_time: lateTime,
-              late_check: toText(getValue(row, 'LateCheck')),
-              late_note: toText(getValue(row, 'LateNote')),
+              late_check: toText(getValue(row, 'latecheck')),
+              late_note: toText(getValue(row, 'reason')),
+              reason: toText(getValue(row, 'reason')),
+              location: toText(getValue(row, 'location')),
+              coords: toText(getValue(row, 'coords')),
+              timestamp_id: toText(getValue(row, 'timestamp_id')),
+              source_timestamp: sourceTimestamp,
+              session_id: toText(getValue(row, 'session_id')),
+              source_email: toText(getValue(row, 'source_email')),
+              device_id: toText(getValue(row, 'device_id')),
+              attendance_status: toText(getValue(row, 'attendance_status')),
+              attendance_remark: toText(getValue(row, 'attendance_remark')),
+              finalized_at: finalizedAt,
+              leave_type: toText(getValue(row, 'leave_type')),
               raw_row: row,
               match,
             },
