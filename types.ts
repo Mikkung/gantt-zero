@@ -27,6 +27,7 @@ export interface Profile {
 
 
 export type TaskFrequencyUnit = "month" | "year";
+export type TaskSource = 'as_original' | 'user_added' | 'admin_added';
 
 export interface Task {
   id: string;
@@ -56,6 +57,9 @@ export interface Task {
   frequency_count?: number | null;
   frequency_unit?: TaskFrequencyUnit| null;
   time_per_occurrence_minutes?: number | null;
+  task_source?: TaskSource | null;
+  counts_toward_assessment?: boolean | null;
+  include_in_ai_summary?: boolean | null;
 }
 
 export type AssessmentPeriodStatus =
@@ -134,6 +138,8 @@ export interface AssessmentTaskSnapshot {
   priority: Task['priority'] | null;
   work_type: WorkType | null;
   snapshot_at: string;
+  counts_toward_assessment?: boolean | null;
+  include_in_ai_summary?: boolean | null;
 }
 
 export type SelfEvaluationSubmissionStatus =

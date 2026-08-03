@@ -1,5 +1,6 @@
 import type { AssessmentPeriod, Profile, Task } from '../types';
 import { calculateTaskProgressMetrics } from './taskProgress';
+import { countsTowardAssessment } from './taskSource';
 
 export function getEmployeeId(profile: Profile | null | undefined) {
   return profile?.display_name || profile?.email || profile?.id || '';
@@ -36,7 +37,9 @@ export function getEmployeeTasksForAssessment(
   tasks: Task[],
   employeeId: string,
 ) {
-  return tasks.filter((task) => task.assignee === employeeId);
+  return tasks.filter(
+    (task) => task.assignee === employeeId && countsTowardAssessment(task),
+  );
 }
 
 export function createAssessmentTaskSnapshots(
@@ -46,7 +49,7 @@ export function createAssessmentTaskSnapshots(
 ) {
   const metrics = calculateTaskProgressMetrics(tasks);
 
-  return tasks.map((task) => ({
+  return tasks.filter(countsTowardAssessment).map((task) => ({
     period_id: periodId,
     employee_id: employeeId,
     task_id: task.id,

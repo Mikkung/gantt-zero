@@ -1,4 +1,5 @@
 import type { Task } from '../types';
+import { countsTowardAssessment } from './taskSource';
 
 export type TaskProgressMetric = {
   isParent: boolean;
@@ -50,41 +51,48 @@ export function getDirectChildren(task: Task, tasks: Task[]) {
   return tasks.filter((candidate) => candidate.parent_id === task.id);
 }
 
+export function getAssessmentChildren(task: Task, tasks: Task[]) {
+  return getDirectChildren(task, tasks).filter(countsTowardAssessment);
+}
+
 export function getTopLevelTasks(tasks: Task[]) {
   const taskIds = new Set(tasks.map((task) => task.id));
   return tasks.filter((task) => !task.parent_id || !taskIds.has(task.parent_id));
 }
 
 export function getWeightedChildren(task: Task, tasks: Task[]) {
-  return getDirectChildren(task, tasks).filter(
+  return getAssessmentChildren(task, tasks).filter(
     (child) => getPositiveWeight(child.weight) > 0,
   );
 }
 
 export function getEffectiveChildWeightTotal(task: Task, tasks: Task[]): number {
-  return getDirectChildren(task, tasks).reduce(
+  return getAssessmentChildren(task, tasks).reduce(
     (sum, child) => sum + calculateEffectiveTaskWeight(child, tasks),
     0,
   );
 }
 
 export function getEffectiveChildren(task: Task, tasks: Task[]) {
-  return getDirectChildren(task, tasks).filter(
+  return getAssessmentChildren(task, tasks).filter(
     (child) => calculateEffectiveTaskWeight(child, tasks) > 0,
   );
 }
 
 export function isEffectiveEvaluableTask(task: Task, tasks: Task[]) {
   const ownWeight = getPositiveWeight(task.weight);
+  if (!countsTowardAssessment(task)) return false;
   if (ownWeight <= 0) return false;
 
-  const children = getDirectChildren(task, tasks);
+  const children = getAssessmentChildren(task, tasks);
   if (!children.length) return true;
 
   return getEffectiveChildWeightTotal(task, tasks) <= 0;
 }
 
 export function calculateEffectiveTaskWeight(task: Task, tasks: Task[]): number {
+  if (!countsTowardAssessment(task)) return 0;
+
   const childEffectiveWeight = getEffectiveChildWeightTotal(task, tasks);
 
   if (childEffectiveWeight > 0) return childEffectiveWeight;
@@ -96,6 +104,8 @@ export function calculateEffectiveWeightedContribution(
   task: Task,
   tasks: Task[],
 ): number {
+  if (!countsTowardAssessment(task)) return 0;
+
   const effectiveChildren = getEffectiveChildren(task, tasks);
 
   if (!effectiveChildren.length) {
@@ -112,7 +122,10 @@ export function calculateEffectiveWeightedContribution(
 }
 
 export function getEffectiveEvaluableTasks(tasks: Task[]) {
-  return tasks.filter((task) => isEffectiveEvaluableTask(task, tasks));
+  const assessmentTasks = tasks.filter(countsTowardAssessment);
+  return assessmentTasks.filter((task) =>
+    isEffectiveEvaluableTask(task, assessmentTasks),
+  );
 }
 
 export function calculateEffectiveWeightTotal(tasks: Task[]) {
@@ -131,7 +144,7 @@ export function validateParentChildWeights(
   tolerance = 0.01,
 ): ParentChildWeightWarning[] {
   return tasks.flatMap((task) => {
-    const children = getDirectChildren(task, tasks);
+    const children = getAssessmentChildren(task, tasks);
     if (!children.length) return [];
 
     const parentWeight = getPositiveWeight(task.weight);
@@ -190,6 +203,8 @@ export function calculateParentProgress(task: Task, tasks: Task[]) {
 }
 
 export function getDisplayProgress(task: Task, tasks: Task[]) {
+  if (!countsTowardAssessment(task)) return toFiniteNumber(task.progress);
+
   if (getEffectiveChildWeightTotal(task, tasks) > 0) {
     return calculateParentProgress(task, tasks);
   }
@@ -308,12 +323,13 @@ export function generateDeterministicProgressSummary(
   tasks: Task[],
 ) {
   const children = getDirectChildren(parentTask, tasks);
-  const done = children.filter((task) => task.status === 'Done').length;
-  const inProgress = children.filter(
+  const assessmentChildren = getAssessmentChildren(parentTask, tasks);
+  const done = assessmentChildren.filter((task) => task.status === 'Done').length;
+  const inProgress = assessmentChildren.filter(
     (task) => task.status === 'In Progress',
   ).length;
-  const notStarted = children.filter((task) => task.status === 'To Do').length;
+  const notStarted = assessmentChildren.filter((task) => task.status === 'To Do').length;
   const averageProgress = calculateParentProgress(parentTask, tasks);
 
-  return `มีงานย่อยทั้งหมด ${children.length} รายการ ดำเนินการเสร็จแล้ว ${done} รายการ อยู่ระหว่างดำเนินการ ${inProgress} รายการ และยังไม่เริ่ม ${notStarted} รายการ ความคืบหน้าเฉลี่ย ${formatProgress(averageProgress)}`;
+  return `มีงานย่อยที่นับในการประเมินทั้งหมด ${assessmentChildren.length} รายการ ดำเนินการเสร็จแล้ว ${done} รายการ อยู่ระหว่างดำเนินการ ${inProgress} รายการ และยังไม่เริ่ม ${notStarted} รายการ ความคืบหน้าเฉลี่ย ${formatProgress(averageProgress)}${children.length > assessmentChildren.length ? ` (มีงานย่อยเพิ่มเติมที่ใช้เป็นบริบท ${children.length - assessmentChildren.length} รายการ)` : ''}`;
 }

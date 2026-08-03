@@ -2,8 +2,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Task, Profile } from '../types';
+import type { Task, Profile, TaskSource } from '../types';
 import { generateDeterministicProgressSummary } from '../utils/taskProgress';
+import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
 
 // ถ้าคุณย้าย WorkType ไปไว้ใน types.ts แล้ว export ก็ลบ type นี้ออกได้
 export type WorkType =
@@ -53,6 +54,8 @@ export default function TaskModal({
 }: TaskModalProps) {
   const isEdit = !!task;
   const disabled = !canEdit;
+  const isUserRole = currentUser?.role === 'user';
+  const isAdminRole = currentUser?.role === 'admin';
 
   // ----- local form state -----
   const [name, setName] = useState('');
@@ -74,6 +77,9 @@ export default function TaskModal({
   const [recurringUnit, setRecurringUnit] =
     useState<Task['recurring_unit']>('month');
   const [dependencies, setDependencies] = useState<string | null>(null);
+  const [taskSource, setTaskSource] = useState<TaskSource>('as_original');
+  const [countsTowardAssessment, setCountsTowardAssessment] = useState(true);
+  const [includeInAiSummary, setIncludeInAiSummary] = useState(true);
 
   // ประเภทงาน
   const [workType, setWorkType] = useState<WorkType | ''>('');
@@ -124,6 +130,9 @@ export default function TaskModal({
       setRecurringInterval(task.recurring_interval ?? null);
       setRecurringUnit(task.recurring_unit ?? 'month');
       setDependencies(task.dependencies ?? '');
+      setTaskSource(task.task_source ?? 'as_original');
+      setCountsTowardAssessment(task.counts_toward_assessment ?? true);
+      setIncludeInAiSummary(task.include_in_ai_summary ?? true);
       setWorkType((task.work_type as WorkType | null) ?? '');
 
       // เพิ่มผลผลิต / จำนวนครั้ง / เวลาที่ใช้
@@ -152,6 +161,9 @@ export default function TaskModal({
       setRecurringInterval(null);
       setRecurringUnit('month');
       setDependencies('');
+      setTaskSource(isAdminRole ? 'admin_added' : 'user_added');
+      setCountsTowardAssessment(isAdminRole);
+      setIncludeInAiSummary(true);
       setWorkType('');
 
       // reset ช่องใหม่
@@ -160,7 +172,20 @@ export default function TaskModal({
       setFrequencyUnit('month');
       setTimePerOccurrenceMinutes('');
     }
-  }, [isOpen, task, currentUser, defaultAssignee]);
+  }, [isOpen, task, currentUser, defaultAssignee, isAdminRole]);
+
+  const parentOptions = useMemo(
+    () =>
+      allTasks.filter((candidate) => {
+        if (task && candidate.id === task.id) return false;
+        if (!isUserRole) return true;
+        return (
+          isOriginalAsTask(candidate) &&
+          candidate.assignee === currentUser?.display_name
+        );
+      }),
+    [allTasks, currentUser?.display_name, isUserRole, task],
+  );
 
   if (!isOpen) return null;
 
@@ -245,6 +270,11 @@ export default function TaskModal({
       frequency_unit: frequencyUnit,
       time_per_occurrence_minutes:
         timePerOccurrenceMinutes === '' ? null : Number(timePerOccurrenceMinutes),
+      task_source: isAdminRole ? taskSource : undefined,
+      counts_toward_assessment: isAdminRole
+        ? countsTowardAssessment
+        : undefined,
+      include_in_ai_summary: isAdminRole ? includeInAiSummary : undefined,
     });
   };
 
@@ -284,6 +314,7 @@ export default function TaskModal({
             </div>
             <div className="modal-title-sub">
               Keep details clear so your team can move fast.
+              {task && ` · ${getTaskSourceLabel(task)}`}
             </div>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -522,6 +553,61 @@ export default function TaskModal({
                 />
               </div>
 
+              {isAdminRole && (
+                <div style={{ marginTop: 12 }}>
+                  <div className="field-label">Assessment source flags</div>
+                  <div className="field-label-small">Task source</div>
+                  <select
+                    className="select"
+                    value={taskSource}
+                    onChange={(e) => setTaskSource(e.target.value as TaskSource)}
+                    disabled={disabled}
+                  >
+                    <option value="as_original">AS Original</option>
+                    <option value="admin_added">Admin Added</option>
+                    <option value="user_added">User Added</option>
+                  </select>
+                  <label
+                    style={{
+                      marginTop: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      color: '#475569',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={countsTowardAssessment}
+                      onChange={(e) =>
+                        setCountsTowardAssessment(e.target.checked)
+                      }
+                      disabled={disabled}
+                    />
+                    Counts toward assessment
+                  </label>
+                  <label
+                    style={{
+                      marginTop: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      color: '#475569',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={includeInAiSummary}
+                      onChange={(e) => setIncludeInAiSummary(e.target.checked)}
+                      disabled={disabled}
+                    />
+                    Include in AI summary
+                  </label>
+                </div>
+              )}
+
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Progress Summary</div>
                 <textarea
@@ -574,19 +660,17 @@ export default function TaskModal({
                   disabled={disabled}
                 >
                   <option value="">No parent</option>
-                  {allTasks
-                    .filter((t) => !task || t.id !== task.id)
-                    // 👇 ถ้ามี currentUser: แสดงเฉพาะที่ assignee ตรงกัน
-                    .filter((t) => {
-                      if (!currentUser?.display_name) return true;
-                      return t.assignee === currentUser.display_name;
-                    })
-                    .map((t) => (
+                  {parentOptions.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>
                     ))}
                 </select>
+                {isUserRole && !isEdit && (
+                  <div className="field-label-small">
+                    งานที่เพิ่มเองต้องอยู่ใต้งานต้นฉบับจาก AS ของคุณ
+                  </div>
+                )}
               </div>
 
               <div style={{ marginTop: 12 }}>
