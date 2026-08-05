@@ -278,7 +278,7 @@ export default function PeerReviewImportPage() {
     return (
       <main style={{ minHeight: '100vh', padding: 24, background: '#f1f5f9' }}>
         <section className="summary-card" style={{ maxWidth: 720 }}>
-          <h1 style={{ marginTop: 0 }}>นำเข้า Peer Review</h1>
+          <h1 style={{ marginTop: 0 }}>นำเข้าผล Peer Review</h1>
           <p>หน้านี้สำหรับผู้ดูแลระบบเท่านั้น</p>
           <Link href="/admin/assessment-periods" className="btn btn-secondary">
             Back
@@ -302,9 +302,11 @@ export default function PeerReviewImportPage() {
         >
           <div>
             <div className="app-logo-text-sub">ISE Work Tracker</div>
-            <h1 style={{ margin: '4px 0', fontSize: 24 }}>นำเข้า Peer Review</h1>
+            <h1 style={{ margin: '4px 0', fontSize: 24 }}>
+              นำเข้าผล Peer Review
+            </h1>
             <p style={{ margin: 0, color: '#64748b' }}>
-              {period?.title ?? '-'} · CSV exported from Excel/SharePoint
+              {period?.title ?? '-'} · Import completed Peer Review result CSV exported from external form/system
             </p>
           </div>
           <Link href="/admin/assessment-periods" className="btn btn-secondary">
@@ -331,7 +333,23 @@ export default function PeerReviewImportPage() {
           }}
         >
           <div className="summary-card" style={{ background: '#ffffff' }}>
-            <h2 style={{ marginTop: 0, fontSize: 18 }}>ไฟล์ Peer Review</h2>
+            <h2 style={{ marginTop: 0, fontSize: 18 }}>ไฟล์ผล Peer Review</h2>
+            <div
+              style={{
+                borderRadius: 10,
+                border: '1px solid #bae6fd',
+                background: '#f0f9ff',
+                color: '#075985',
+                padding: 10,
+                marginBottom: 12,
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              หน้านี้ใช้สำหรับนำเข้าผลการตอบแบบประเมิน Peer Review
+              หลังจากมีผู้ตอบแบบประเมินแล้ว
+              ไม่ใช่หน้าสำหรับมอบหมายว่าใครต้องประเมินใคร
+            </div>
             <label className="field-label">รูปแบบไฟล์ที่รองรับ</label>
             <div style={{ color: '#64748b', fontSize: 13, marginBottom: 10 }}>
               CSV เท่านั้นใน Phase นี้ โดย export จาก Excel ได้โดยตรง
@@ -348,8 +366,8 @@ export default function PeerReviewImportPage() {
               }}
             >
               <div>
-                ใช้ Template นี้เพื่อจัดรูปแบบข้อมูลก่อนนำเข้า ระบบรองรับไฟล์
-                CSV ที่มีคอลัมน์ตามที่กำหนด
+                ใช้ Template นี้เพื่อจัดรูปแบบผลการตอบแบบประเมินก่อนนำเข้า
+                ระบบรองรับไฟล์ CSV ที่มีคอลัมน์ตามที่กำหนด
               </div>
               <div style={{ marginTop: 4 }}>
                 หากข้อมูลมาจาก Excel บน SharePoint ให้ Export หรือ Save As
@@ -385,7 +403,7 @@ export default function PeerReviewImportPage() {
                 checked={replaceExisting}
                 onChange={(event) => setReplaceExisting(event.target.checked)}
               />
-              แทนที่ข้อมูล Peer Review เดิมของรอบนี้
+              แทนที่ข้อมูลผล Peer Review เดิมของรอบนี้
             </label>
 
             <div
@@ -396,7 +414,7 @@ export default function PeerReviewImportPage() {
               }}
             >
               <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>
-                Expected CSV columns
+                Expected Result CSV columns
               </h3>
               <div style={{ color: '#64748b', fontSize: 12, lineHeight: 1.6 }}>
                 {PEER_REVIEW_COLUMNS.join(', ')}

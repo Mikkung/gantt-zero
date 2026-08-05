@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '../components/AppShell';
+import AddedTaskBulkImportModal from '../components/AddedTaskBulkImportModal';
 import GanttChart from '../components/GanttChart';
 import TaskModal from '../components/TaskModal';
 import { supabase } from '../utils/supabase';
@@ -27,6 +28,7 @@ import {
 import type { Task, Team, Profile, Role } from '../types';
 
 type ViewType = 'gantt' | 'list' | 'board' | 'calendar';
+type AddedTaskBulkImportMode = 'download' | 'import';
 
 function roleCanSeeAll(role: Role | undefined | null) {
   return role === 'admin' || role === 'manager';
@@ -38,6 +40,9 @@ export default function HomePage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddedTaskImportOpen, setIsAddedTaskImportOpen] = useState(false);
+  const [addedTaskImportMode, setAddedTaskImportMode] =
+    useState<AddedTaskBulkImportMode>('download');
 
   const [view, setView] = useState<ViewType>('gantt');
 
@@ -409,6 +414,16 @@ export default function HomePage() {
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task);
     setIsModalOpen(true);
+  };
+
+  const handleOpenAddedTaskDownload = () => {
+    setAddedTaskImportMode('download');
+    setIsAddedTaskImportOpen(true);
+  };
+
+  const handleOpenAddedTaskImport = () => {
+    setAddedTaskImportMode('import');
+    setIsAddedTaskImportOpen(true);
   };
 
   const upsertTaskInState = (task: Task) => {
@@ -1136,6 +1151,8 @@ export default function HomePage() {
   return (
     <AppShell
       onNewTask={handleNewTask}
+      onDownloadAddedTaskTemplate={handleOpenAddedTaskDownload}
+      onImportAddedTasks={handleOpenAddedTaskImport}
       activeView={view}
       onChangeView={setView}
       teams={teams}
@@ -1378,6 +1395,14 @@ export default function HomePage() {
         onSave={handleSaveTask}
         onDelete={handleDeleteTask}
         onDuplicate={handleDuplicateTask}  
+      />
+      <AddedTaskBulkImportModal
+        isOpen={isAddedTaskImportOpen}
+        initialMode={addedTaskImportMode}
+        tasks={tasks}
+        currentProfile={currentProfile}
+        onClose={() => setIsAddedTaskImportOpen(false)}
+        onImported={loadTasks}
       />
     </AppShell>
   );
