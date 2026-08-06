@@ -31,12 +31,14 @@ interface TaskModalProps {
   currentUser?: Profile | null;
   canEdit?: boolean;
   defaultAssignee?: string | null;
+  fixedParentTask?: Task | null;
   onClose: () => void;
   onSave: (partial: Partial<Task>) => void;
   onDelete: (id: string) => void;
 
   // 👇 ใหม่: ฟังก์ชันสำหรับ duplicate task
   onDuplicate?: (task: Task) => void;
+  onAddSubtask?: (task: Task) => void;
 }
 
 export default function TaskModal({
@@ -47,15 +49,18 @@ export default function TaskModal({
   currentUser,
   canEdit = true,
   defaultAssignee,
+  fixedParentTask,
   onClose,
   onSave,
   onDelete,
   onDuplicate,
+  onAddSubtask,
 }: TaskModalProps) {
   const isEdit = !!task;
   const disabled = !canEdit;
   const isUserRole = currentUser?.role === 'user';
   const isAdminRole = currentUser?.role === 'admin';
+  const isCreateChildMode = !isEdit && !!fixedParentTask;
 
   // ----- local form state -----
   const [name, setName] = useState('');
@@ -88,7 +93,8 @@ export default function TaskModal({
   const [output, setOutput] = useState('');
   const [frequencyCount, setFrequencyCount] = useState<number | ''>('');
   const [frequencyUnit, setFrequencyUnit] = useState<'month' | 'year'>('month');
-  const [timePerOccurrenceMinutes, setTimePerOccurrenceMinutes] = useState<number | ''>('');
+  const [timePerOccurrenceMinutes, setTimePerOccurrenceMinutes] =
+    useState<number | ''>('');
 
   const assigneeSuggestions = useMemo(() => {
     const list = users || [];
@@ -154,17 +160,29 @@ export default function TaskModal({
       setProgress(0);
       setWeight(0);
       setProgressSummary('');
-      setAssignee(defaultAssignee ?? currentUser?.display_name ?? null);
-      setParentId(null);
+      setAssignee(
+        isCreateChildMode
+          ? currentUser?.role === 'user'
+            ? currentUser.display_name
+            : fixedParentTask?.assignee ?? currentUser?.display_name ?? null
+          : defaultAssignee ?? currentUser?.display_name ?? null,
+      );
+      setParentId(isCreateChildMode ? fixedParentTask?.id ?? null : null);
       setIsRecurring(false);
       setRecurringType('none');
       setRecurringInterval(null);
       setRecurringUnit('month');
       setDependencies('');
-      setTaskSource(isAdminRole ? 'admin_added' : 'user_added');
-      setCountsTowardAssessment(isAdminRole);
+      setTaskSource(
+        isCreateChildMode
+          ? 'user_added'
+          : isAdminRole
+            ? 'admin_added'
+            : 'user_added',
+      );
+      setCountsTowardAssessment(isCreateChildMode ? false : isAdminRole);
       setIncludeInAiSummary(true);
-      setWorkType('');
+      setWorkType((fixedParentTask?.work_type as WorkType | null) ?? '');
 
       // reset ช่องใหม่
       setOutput('');
@@ -172,7 +190,15 @@ export default function TaskModal({
       setFrequencyUnit('month');
       setTimePerOccurrenceMinutes('');
     }
-  }, [isOpen, task, currentUser, defaultAssignee, isAdminRole]);
+  }, [
+    isOpen,
+    task,
+    currentUser,
+    defaultAssignee,
+    isAdminRole,
+    isCreateChildMode,
+    fixedParentTask,
+  ]);
 
   const parentOptions = useMemo(
     () =>
@@ -216,7 +242,10 @@ export default function TaskModal({
   const estimatedHours =
     frequencyCount === '' || timePerOccurrenceMinutes === ''
       ? null
-      : ((Number(frequencyCount) * Number(timePerOccurrenceMinutes)) / 60).toFixed(1);
+      : (
+          (Number(frequencyCount) * Number(timePerOccurrenceMinutes)) /
+          60
+        ).toFixed(1);
 
   const handleSubmit = () => {
     if (!canEdit) {
@@ -254,10 +283,14 @@ export default function TaskModal({
       status,
       priority,
       progress,
-      weight: weight === '' ? 0 : Number(weight),
+      weight: isCreateChildMode ? 0 : weight === '' ? 0 : Number(weight),
       progress_summary: progressSummary.trim() || null,
-      assignee,
-      parent_id: parentId,
+      assignee: isCreateChildMode
+        ? currentUser?.role === 'user'
+          ? currentUser.display_name
+          : fixedParentTask?.assignee ?? assignee
+        : assignee,
+      parent_id: isCreateChildMode ? fixedParentTask?.id ?? null : parentId,
       is_recurring: isRecurring,
       recurring_type: isRecurring ? recurringType : 'none',
       recurring_interval: isRecurring ? recurringInterval : null,
@@ -269,12 +302,24 @@ export default function TaskModal({
       frequency_count: frequencyCount === '' ? null : Number(frequencyCount),
       frequency_unit: frequencyUnit,
       time_per_occurrence_minutes:
-        timePerOccurrenceMinutes === '' ? null : Number(timePerOccurrenceMinutes),
-      task_source: isAdminRole ? taskSource : undefined,
-      counts_toward_assessment: isAdminRole
-        ? countsTowardAssessment
-        : undefined,
-      include_in_ai_summary: isAdminRole ? includeInAiSummary : undefined,
+        timePerOccurrenceMinutes === ''
+          ? null
+          : Number(timePerOccurrenceMinutes),
+      task_source: isCreateChildMode
+        ? 'user_added'
+        : isAdminRole
+          ? taskSource
+          : undefined,
+      counts_toward_assessment: isCreateChildMode
+        ? false
+        : isAdminRole
+          ? countsTowardAssessment
+          : undefined,
+      include_in_ai_summary: isCreateChildMode
+        ? true
+        : isAdminRole
+          ? includeInAiSummary
+          : undefined,
     });
   };
 
@@ -298,6 +343,15 @@ export default function TaskModal({
 
   const canGenerateSummary =
     !!task && allTasks.some((candidate) => candidate.parent_id === task.id);
+  const canAddSubtaskFromModal =
+    !!task &&
+    !!onAddSubtask &&
+    !disabled &&
+    isOriginalAsTask(task) &&
+    (isAdminRole ||
+      (isUserRole && task.assignee === currentUser?.display_name));
+  const canDeleteTask =
+    !!task && canEdit && !(isUserRole && isOriginalAsTask(task));
 
   const RequiredMark = () => (
     <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
@@ -310,11 +364,16 @@ export default function TaskModal({
         <div className="modal-header">
           <div>
             <div className="modal-title-main">
-              {isEdit ? 'Edit task' : 'Create task'}
+              {isCreateChildMode
+                ? 'Create subtask'
+                : isEdit
+                  ? 'Edit task'
+                  : 'Create task'}
             </div>
             <div className="modal-title-sub">
               Keep details clear so your team can move fast.
               {task && ` · ${getTaskSourceLabel(task)}`}
+              {isCreateChildMode && ' · Added Task'}
             </div>
           </div>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -324,6 +383,27 @@ export default function TaskModal({
 
         {/* body */}
         <div className="modal-body">
+          {isCreateChildMode && fixedParentTask && (
+            <div
+              style={{
+                borderRadius: 10,
+                border: '1px solid #bae6fd',
+                background: '#f0f9ff',
+                color: '#075985',
+                padding: 10,
+                marginBottom: 12,
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              <strong>เพิ่มงานย่อยใต้:</strong> {fixedParentTask.name}
+              <div style={{ marginTop: 4 }}>
+                งานที่เพิ่มเองจะไม่ถูกนำไปคิดคะแนนประเมิน
+                แต่สามารถใช้เป็นข้อมูลประกอบ AI Summary ได้
+              </div>
+            </div>
+          )}
+
           <div className="modal-form-grid-2">
             {/* Left column */}
             <div>
@@ -535,25 +615,27 @@ export default function TaskModal({
                 />
               </div>
 
-              <div style={{ marginTop: 12 }}>
-                <div className="field-label">Weight</div>
-                <input
-                  type="number"
-                  className="input"
-                  value={weight}
-                  onChange={(e) =>
-                    setWeight(
-                      e.target.value === '' ? '' : Number(e.target.value),
-                    )
-                  }
-                  placeholder="0"
-                  min={0}
-                  step="0.1"
-                  disabled={disabled}
-                />
-              </div>
+              {!isCreateChildMode && (
+                <div style={{ marginTop: 12 }}>
+                  <div className="field-label">Weight</div>
+                  <input
+                    type="number"
+                    className="input"
+                    value={weight}
+                    onChange={(e) =>
+                      setWeight(
+                        e.target.value === '' ? '' : Number(e.target.value),
+                      )
+                    }
+                    placeholder="0"
+                    min={0}
+                    step="0.1"
+                    disabled={disabled}
+                  />
+                </div>
+              )}
 
-              {isAdminRole && (
+              {isAdminRole && !isCreateChildMode && (
                 <div style={{ marginTop: 12 }}>
                   <div className="field-label">Assessment source flags</div>
                   <div className="field-label-small">Task source</div>
@@ -636,36 +718,66 @@ export default function TaskModal({
                   Assignee
                   <RequiredMark />
                 </div>
-                <input
-                  className="input"
-                  list="assignee-options"
-                  value={assignee ?? ''}
-                  onChange={(e) => setAssignee(e.target.value || null)}
-                  placeholder="Name or email"
-                  disabled={disabled}
-                />
-                <datalist id="assignee-options">
-                  {assigneeSuggestions.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
+                {isCreateChildMode ? (
+                  <div
+                    className="input"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: '#475569',
+                      background: '#f8fafc',
+                    }}
+                  >
+                    {assignee || '-'}
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      className="input"
+                      list="assignee-options"
+                      value={assignee ?? ''}
+                      onChange={(e) => setAssignee(e.target.value || null)}
+                      placeholder="Name or email"
+                      disabled={disabled}
+                    />
+                    <datalist id="assignee-options">
+                      {assigneeSuggestions.map((name) => (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
+                  </>
+                )}
               </div>
 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Parent task</div>
-                <select
-                  className="select"
-                  value={parentId ?? ''}
-                  onChange={(e) => setParentId(e.target.value || null)}
-                  disabled={disabled}
-                >
-                  <option value="">No parent</option>
-                  {parentOptions.map((t) => (
+                {isCreateChildMode && fixedParentTask ? (
+                  <div
+                    className="input"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: '#475569',
+                      background: '#f8fafc',
+                    }}
+                  >
+                    {fixedParentTask.name}
+                  </div>
+                ) : (
+                  <select
+                    className="select"
+                    value={parentId ?? ''}
+                    onChange={(e) => setParentId(e.target.value || null)}
+                    disabled={disabled}
+                  >
+                    <option value="">No parent</option>
+                    {parentOptions.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>
                     ))}
-                </select>
+                  </select>
+                )}
                 {isUserRole && !isEdit && (
                   <div className="field-label-small">
                     งานที่เพิ่มเองต้องอยู่ใต้งานต้นฉบับจาก AS ของคุณ
@@ -694,13 +806,15 @@ export default function TaskModal({
           <div style={{ display: 'flex', gap: 8 }}>
             {isEdit && canEdit && (
               <>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={handleDeleteClick}
-                >
-                  Delete
-                </button>
+                {canDeleteTask && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={handleDeleteClick}
+                  >
+                    Delete
+                  </button>
+                )}
 
                 {/* 👇 ปุ่ม Duplicate ใหม่ */}
                 {onDuplicate && (
@@ -710,6 +824,17 @@ export default function TaskModal({
                     onClick={handleDuplicateClick}
                   >
                     Duplicate
+                  </button>
+                )}
+                {canAddSubtaskFromModal && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      if (task) onAddSubtask(task);
+                    }}
+                  >
+                    + Create Subtask
                   </button>
                 )}
               </>

@@ -46,7 +46,7 @@ type PreviewRow = {
   messages: string[];
 };
 
-const TASK_SHEET_NAME = 'เพิ่มงานย่อย';
+const TASK_SHEET_NAME = '+ Create Subtask';
 const INSTRUCTION_SHEET_NAME = 'คำแนะนำ';
 const SYSTEM_PARENT_MAP_SHEET_NAME = '_SYSTEM_PARENT_MAP';
 

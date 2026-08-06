@@ -39,6 +39,8 @@ export default function HomePage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [fixedChildParentTask, setFixedChildParentTask] =
+    useState<Task | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAddedTaskImportOpen, setIsAddedTaskImportOpen] = useState(false);
   const [addedTaskImportMode, setAddedTaskImportMode] =
@@ -407,12 +409,33 @@ export default function HomePage() {
       );
       return;
     }
+    setFixedChildParentTask(null);
     setSelectedTask(null);
     setIsModalOpen(true);
   };
 
   const handleTaskClick = (task: Task) => {
+    setFixedChildParentTask(null);
     setSelectedTask(task);
+    setIsModalOpen(true);
+  };
+
+  const canAddSubtaskToTask = (task: Task) => {
+    if (!canEditTasks || !currentProfile || !isOriginalAsTask(task)) {
+      return false;
+    }
+    if (currentProfile.role === 'admin') return true;
+    if (currentProfile.role !== 'user') return false;
+    return task.assignee === currentProfile.display_name;
+  };
+
+  const handleAddSubtask = (parentTask: Task) => {
+    if (!canAddSubtaskToTask(parentTask)) {
+      alert('You can add child tasks only under your own AS tasks.');
+      return;
+    }
+    setSelectedTask(null);
+    setFixedChildParentTask(parentTask);
     setIsModalOpen(true);
   };
 
@@ -460,6 +483,7 @@ export default function HomePage() {
         : null;
       const isUserRole = currentProfile?.role === 'user';
       const isCreating = !selectedTask;
+      const isCreatingFixedChildTask = isCreating && !!fixedChildParentTask;
 
       if (
         selectedTask &&
@@ -483,6 +507,24 @@ export default function HomePage() {
         }
       }
 
+      if (isCreatingFixedChildTask) {
+        if (!parentTask || parentTask.id !== fixedChildParentTask.id) {
+          alert('Cannot create subtask because the parent task was not set.');
+          return;
+        }
+        if (!isOriginalAsTask(parentTask)) {
+          alert('Child tasks can be added only under original AS tasks.');
+          return;
+        }
+        if (
+          currentProfile?.role === 'user' &&
+          parentTask.assignee !== currentProfile.display_name
+        ) {
+          alert('You can add child tasks only under your own AS tasks.');
+          return;
+        }
+      }
+
       const defaultTeamId = roleCanSeeAll(currentProfile?.role)
         ? filterTeamId ?? currentProfile?.team_id ?? null
         : currentProfile?.team_id ?? null;
@@ -491,22 +533,36 @@ export default function HomePage() {
         (partial as any).team_id ??
         defaultTeamId;
       const effectiveAssignee =
-        isCreating && isUserRole
-          ? currentProfile?.display_name ?? parentTask?.assignee ?? normalizedAssignee
-          : normalizedAssignee;
+        isCreatingFixedChildTask
+          ? currentProfile?.role === 'user'
+            ? currentProfile.display_name
+            : parentTask?.assignee ??
+              currentProfile?.display_name ??
+              normalizedAssignee
+          : isCreating && isUserRole
+            ? currentProfile?.display_name ??
+              parentTask?.assignee ??
+              normalizedAssignee
+            : normalizedAssignee;
       const normalizedTaskSource = selectedTask
         ? selectedTask.task_source ?? 'as_original'
-        : isAdmin
-          ? partial.task_source ?? 'admin_added'
-          : 'user_added';
+        : isCreatingFixedChildTask
+          ? 'user_added'
+          : isAdmin
+            ? partial.task_source ?? 'admin_added'
+            : 'user_added';
       const normalizedCountsTowardAssessment = selectedTask
         ? selectedTask.counts_toward_assessment ?? true
-        : isAdmin
-          ? partial.counts_toward_assessment ?? true
-          : false;
+        : isCreatingFixedChildTask
+          ? false
+          : isAdmin
+            ? partial.counts_toward_assessment ?? true
+            : false;
       const normalizedIncludeInAiSummary = selectedTask
         ? selectedTask.include_in_ai_summary ?? true
-        : partial.include_in_ai_summary ?? true;
+        : isCreatingFixedChildTask
+          ? true
+          : partial.include_in_ai_summary ?? true;
       let savedTaskForState: Task | null = null;
 
       if (selectedTask) {
@@ -611,6 +667,7 @@ export default function HomePage() {
       }
 
       setIsModalOpen(false);
+      setFixedChildParentTask(null);
       await loadTasks();
       if (savedTaskForState) {
         upsertTaskInState(savedTaskForState);
@@ -624,6 +681,16 @@ export default function HomePage() {
   const handleDeleteTask = async (id: string) => {
     try {
       if (!canEditTasks) return;
+
+      const targetTask = tasks.find((task) => task.id === id);
+      if (
+        currentProfile?.role === 'user' &&
+        targetTask &&
+        isOriginalAsTask(targetTask)
+      ) {
+        alert('Original AS tasks cannot be deleted by users.');
+        return;
+      }
 
       const { error } = await supabase.from('tasks').delete().eq('id', id);
       if (error) {
@@ -752,10 +819,14 @@ export default function HomePage() {
   function TasksListView({
     tasks,
     onTaskClick,
+    onAddSubtask,
+    canAddSubtask,
     groupByAssignee = true,
   }: {
     tasks: Task[];
     onTaskClick: (t: Task) => void;
+    onAddSubtask: (t: Task) => void;
+    canAddSubtask: (t: Task) => boolean;
     groupByAssignee?: boolean;
   }) {
     const listMetrics = useMemo(
@@ -789,6 +860,25 @@ export default function HomePage() {
               {depth > 0 ? '↳ ' : ''}
               {t.name}
               {renderTaskSourceBadge(t)}
+              {canAddSubtask(t) && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddSubtask(t);
+                  }}
+                  style={{
+                    marginLeft: 8,
+                    padding: '3px 7px',
+                    fontSize: 11,
+                    whiteSpace: 'nowrap',
+                    color: '#9b1c1c',
+                  }}
+                >
+                  + Create Subtask
+                </button>
+              )}
             </td>
             <td style={{ padding: 6, textAlign: 'center' }}>
               {t.assignee}
@@ -925,9 +1015,13 @@ export default function HomePage() {
   function TasksBoardView({
     tasks,
     onTaskClick,
+    onAddSubtask,
+    canAddSubtask,
   }: {
     tasks: Task[];
     onTaskClick: (t: Task) => void;
+    onAddSubtask: (t: Task) => void;
+    canAddSubtask: (t: Task) => boolean;
   }) {
     const columns: Array<{ key: Task['status']; label: string }> = [
       { key: 'To Do', label: 'To Do' },
@@ -1019,6 +1113,24 @@ export default function HomePage() {
                           {t.name}
                           {renderTaskSourceBadge(t)}
                         </div>
+                        {canAddSubtask(t) && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onAddSubtask(t);
+                            }}
+                            style={{
+                              marginTop: 5,
+                              padding: '3px 7px',
+                              fontSize: 11,
+                              color: '#9b1c1c',
+                            }}
+                          >
+                            + Create Subtask
+                          </button>
+                        )}
                         <div
                           style={{
                             fontSize: 11,
@@ -1058,9 +1170,13 @@ export default function HomePage() {
   function TasksCalendarView({
     tasks,
     onTaskClick,
+    onAddSubtask,
+    canAddSubtask,
   }: {
     tasks: Task[];
     onTaskClick: (t: Task) => void;
+    onAddSubtask: (t: Task) => void;
+    canAddSubtask: (t: Task) => boolean;
   }) {
     const byDate: Record<string, Task[]> = {};
     tasks.forEach((t) => {
@@ -1135,6 +1251,24 @@ export default function HomePage() {
                         {t.name}
                         {renderTaskSourceBadge(t)} ·{' '}
                         {formatProgress(t.calculated_progress ?? t.progress)}
+                        {canAddSubtask(t) && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onAddSubtask(t);
+                            }}
+                            style={{
+                              marginLeft: 6,
+                              padding: '2px 6px',
+                              fontSize: 10,
+                              color: '#9b1c1c',
+                            }}
+                          >
+                            + Create Subtask
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1367,17 +1501,23 @@ export default function HomePage() {
             <TasksListView
               tasks={tasksWithCalculatedProgress}
               onTaskClick={handleTaskClick}
+              onAddSubtask={handleAddSubtask}
+              canAddSubtask={canAddSubtaskToTask}
               groupByAssignee={!filterAssignee}
             />
           ) : view === 'board' ? (
             <TasksBoardView
               tasks={tasksWithCalculatedProgress}
               onTaskClick={handleTaskClick}
+              onAddSubtask={handleAddSubtask}
+              canAddSubtask={canAddSubtaskToTask}
             />
           ) : (
             <TasksCalendarView
               tasks={tasksWithCalculatedProgress}
               onTaskClick={handleTaskClick}
+              onAddSubtask={handleAddSubtask}
+              canAddSubtask={canAddSubtaskToTask}
             />
           )}
         </div>
@@ -1391,10 +1531,15 @@ export default function HomePage() {
         currentUser={currentProfile}
         canEdit={canEditTasks}
         defaultAssignee={filterAssignee}
-        onClose={() => setIsModalOpen(false)}
+        fixedParentTask={fixedChildParentTask}
+        onClose={() => {
+          setIsModalOpen(false);
+          setFixedChildParentTask(null);
+        }}
         onSave={handleSaveTask}
         onDelete={handleDeleteTask}
-        onDuplicate={handleDuplicateTask}  
+        onDuplicate={handleDuplicateTask}
+        onAddSubtask={handleAddSubtask}
       />
       <AddedTaskBulkImportModal
         isOpen={isAddedTaskImportOpen}

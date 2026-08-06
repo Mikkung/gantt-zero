@@ -1,6 +1,6 @@
 # Phase 10 Design: User Added Task Bulk Import
 
-เอกสารนี้เป็น design/documentation เท่านั้น ยังไม่ implement โค้ด ยังไม่สร้าง migration และยังไม่เปลี่ยน RLS หรือ `MAINTENANCE_MODE`
+เอกสารนี้บันทึก design และ implementation notes สำหรับ user-added tasks ทั้งแบบ bulk import และ manual add-subtask UX ไม่มีการสร้าง migration ใหม่ และไม่มีการเปลี่ยน RLS หรือ `MAINTENANCE_MODE`
 
 ## เป้าหมาย
 
@@ -32,6 +32,35 @@
 - user-added tasks ไม่ควรนับใน official assessment score
 
 ## Recommended UX
+
+### Manual Add Subtask UX
+
+หน้า Task Tracking หลักมีปุ่ม `+ Create Subtask` บน task ที่เป็น original AS task:
+
+- แสดงเฉพาะ `task_source = as_original`
+- สำหรับ role `user` แสดงเฉพาะ task ที่ `assignee = profiles.display_name` ของ user ปัจจุบัน
+- ไม่แสดงบน `user_added` tasks
+- เมื่อกดปุ่ม ระบบเปิด `TaskModal` ในโหมด create child task และ fix parent เป็น AS task ที่กด
+- Modal แสดงข้อความ `เพิ่มงานย่อยใต้: {parent task name}` เป็น read-only context
+- Parent task, assignee, weight, task source, assessment flags ถูกบังคับโดยระบบ ไม่ให้ user override
+- Role `user` ไม่สามารถ delete original AS task ได้ แต่ยังจัดการ user-added task ของตนเองตาม flow เดิมได้
+
+ค่าที่ระบบบังคับเมื่อ save งานย่อยจากปุ่มนี้:
+
+- `parent_id = id` ของ original AS task ที่กด
+- `assignee = profiles.display_name` ของ user ปัจจุบัน สำหรับ role `user`
+- `task_source = user_added`
+- `counts_toward_assessment = false`
+- `include_in_ai_summary = true`
+- `weight = 0`
+
+ผลด้าน assessment:
+
+- งานที่เพิ่มเองไม่ถูกนับใน official assessment scoring
+- Original AS parent ยังอยู่ใน official evaluation เหมือนเดิม เพราะ child ที่เพิ่มเองถูก set `counts_toward_assessment = false`
+- AI summary ยังสามารถอ่าน user-added tasks เป็น supplementary evidence ได้ผ่าน `include_in_ai_summary = true`
+
+### Bulk Import UX
 
 เพิ่มปุ่มบนหน้า Task Tracking หลัก:
 
