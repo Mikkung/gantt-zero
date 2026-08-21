@@ -876,7 +876,7 @@ export default function HomePage() {
                     color: '#9b1c1c',
                   }}
                 >
-                  + Create Subtask
+                  + Add subtask
                 </button>
               )}
             </td>
@@ -1128,7 +1128,7 @@ export default function HomePage() {
                               color: '#9b1c1c',
                             }}
                           >
-                            + Create Subtask
+                            + Add subtask
                           </button>
                         )}
                         <div
@@ -1266,7 +1266,7 @@ export default function HomePage() {
                               color: '#9b1c1c',
                             }}
                           >
-                            + Create Subtask
+                            + Add subtask
                           </button>
                         )}
                       </div>
@@ -1496,6 +1496,8 @@ export default function HomePage() {
               tasks={tasksWithCalculatedProgress}
               onTaskUpdate={loadTasks}
               onTaskClick={handleTaskClick}
+              onAddSubtask={handleAddSubtask}
+              canAddSubtask={canAddSubtaskToTask}
             />
           ) : view === 'list' ? (
             <TasksListView

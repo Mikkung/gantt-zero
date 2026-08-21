@@ -350,8 +350,6 @@ export default function TaskModal({
     isOriginalAsTask(task) &&
     (isAdminRole ||
       (isUserRole && task.assignee === currentUser?.display_name));
-  const canDeleteTask =
-    !!task && canEdit && !(isUserRole && isOriginalAsTask(task));
 
   const RequiredMark = () => (
     <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
@@ -398,8 +396,6 @@ export default function TaskModal({
             >
               <strong>เพิ่มงานย่อยใต้:</strong> {fixedParentTask.name}
               <div style={{ marginTop: 4 }}>
-                งานที่เพิ่มเองจะไม่ถูกนำไปคิดคะแนนประเมิน
-                แต่สามารถใช้เป็นข้อมูลประกอบ AI Summary ได้
               </div>
             </div>
           )}
@@ -806,15 +802,13 @@ export default function TaskModal({
           <div style={{ display: 'flex', gap: 8 }}>
             {isEdit && canEdit && (
               <>
-                {canDeleteTask && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={handleDeleteClick}
-                  >
-                    Delete
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={handleDeleteClick}
+                >
+                  Delete
+                </button>
 
                 {/* 👇 ปุ่ม Duplicate ใหม่ */}
                 {onDuplicate && (
@@ -834,7 +828,7 @@ export default function TaskModal({
                       if (task) onAddSubtask(task);
                     }}
                   >
-                    + Create Subtask
+                    + Add subtask
                   </button>
                 )}
               </>
