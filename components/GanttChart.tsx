@@ -19,6 +19,8 @@ interface GanttProps {
   tasks: Task[];
   onTaskUpdate: () => void;
   onTaskClick: (task: Task) => void;
+  onAddSubtask?: (task: Task) => void;
+  canAddSubtask?: (task: Task) => boolean;
 }
 
 type ViewMode = 'Day' | 'Week' | 'Month';
@@ -216,6 +218,8 @@ export default function GanttChart({
   tasks,
   onTaskUpdate,
   onTaskClick,
+  onAddSubtask,
+  canAddSubtask,
 }: GanttProps) {
   const ganttRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
@@ -1065,6 +1069,10 @@ export default function GanttChart({
                   toggleCollapse(row.id);
                 }
               };
+              const showAddSubtaskButton =
+                row.kind === 'task' &&
+                !!onAddSubtask &&
+                (canAddSubtask?.(row.task) ?? false);
 
               return (
                 <div key={row.id}>
@@ -1088,6 +1096,25 @@ export default function GanttChart({
                       <span className="gantt-tree-toggle" />
                     )}
                     <span className="gantt-tree-row-label">{row.label}</span>
+                    {showAddSubtaskButton && row.kind === 'task' && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onAddSubtask(row.task);
+                        }}
+                        style={{
+                          marginLeft: 6,
+                          padding: '2px 6px',
+                          fontSize: 10,
+                          color: '#9b1c1c',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        + Add subtask
+                      </button>
+                    )}
                   </div>
                 </div>
               );

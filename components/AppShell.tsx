@@ -13,6 +13,8 @@ interface AppShellProps {
 
   // top-right: new task
   onNewTask: () => void;
+  onDownloadAddedTaskTemplate?: () => void;
+  onImportAddedTasks?: () => void;
 
   // views : List / Board / Calendar / Gantt
   activeView: ViewType;
@@ -40,6 +42,8 @@ interface AppShellProps {
 export function AppShell({
   children,
   onNewTask,
+  onDownloadAddedTaskTemplate,
+  onImportAddedTasks,
   activeView,
   onChangeView,
   teams,
@@ -81,6 +85,11 @@ export function AppShell({
   // manager (user.M) = read only → ไม่ให้สร้าง task
   const canCreateTask =
     !!currentProfile && currentProfile.role !== 'manager';
+  const canUseAddedTaskImport =
+    !!currentProfile &&
+    currentProfile.role !== 'manager' &&
+    !!onDownloadAddedTaskTemplate &&
+    !!onImportAddedTasks;
 
   return (
     <div className="app-shell">
@@ -173,6 +182,23 @@ export function AppShell({
             >
               Self evaluation
             </Link>
+            {(currentProfile?.role === 'user' ||
+              currentProfile?.role === 'admin') && (
+              <Link
+                href="/employee/peer-feedback"
+                style={{
+                  width: '100%',
+                  borderRadius: 10,
+                  padding: '8px 10px',
+                  fontSize: 13,
+                  color: '#475569',
+                  textDecoration: 'none',
+                  display: 'flex',
+                }}
+              >
+                Peer Feedback Review
+              </Link>
+            )}
             {currentProfile?.role === 'admin' && (
               <>
                 <Link
@@ -188,6 +214,20 @@ export function AppShell({
                   }}
                 >
                   Period setup
+                </Link>
+                <Link
+                  href="/admin/peer-feedback-assignments"
+                  style={{
+                    width: '100%',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    color: '#475569',
+                    textDecoration: 'none',
+                    display: 'flex',
+                  }}
+                >
+                  Peer Feedback Assignment
                 </Link>
                 <Link
                   href="/admin/attendance-import"
@@ -318,13 +358,33 @@ export function AppShell({
 
             {/* new task (ซ่อนถ้า role = manager) */}
             {canCreateTask && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={onNewTask}
-              >
-                + New Task
-              </button>
+              <>
+                {canUseAddedTaskImport && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={onDownloadAddedTaskTemplate}
+                    >
+                      Download Added Task Template
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={onImportAddedTasks}
+                    >
+                      Import Added Tasks
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={onNewTask}
+                >
+                  + New Task
+                </button>
+              </>
             )}
 
             {/* profile or login */}
