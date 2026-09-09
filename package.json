@@ -11,6 +11,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "frappe-gantt": "^0.6.1",
+    "jszip": "^3.10.2",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
