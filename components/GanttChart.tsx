@@ -29,6 +29,12 @@ const GANTT_LEFT_PANE_STORAGE_KEY = 'gantt-left-pane-width';
 const GANTT_LEFT_PANE_DEFAULT_WIDTH = 300;
 const GANTT_LEFT_PANE_MIN_WIDTH = 220;
 const GANTT_LEFT_PANE_MAX_WIDTH = 600;
+const FREQUENCY_UNIT_SHORT_LABELS: Record<string, string> = {
+  year: 'ปี',
+  month: 'เดือน',
+  academic_year: 'ปีการศึกษา',
+  semester: 'ภาคการศึกษา',
+};
 
 function getMaxLeftPaneWidth() {
   if (typeof window === 'undefined') return GANTT_LEFT_PANE_MAX_WIDTH;
@@ -160,7 +166,7 @@ function buildTaskDisplayLabel(task: Task): string {
     minutes > 0
   ) {
     const hours = (count * minutes) / 60;
-    const unitText = unit === 'year' ? 'ปี' : 'เดือน';
+    const unitText = FREQUENCY_UNIT_SHORT_LABELS[String(unit ?? 'month')] ?? String(unit);
     return `${task.name} (${hours.toFixed(1)} ชม./${unitText})`;
   }
 

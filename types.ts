@@ -26,7 +26,11 @@ export interface Profile {
 }
 
 
-export type TaskFrequencyUnit = "month" | "year";
+export type TaskFrequencyUnit =
+  | 'month'
+  | 'year'
+  | 'academic_year'
+  | 'semester';
 export type TaskSource = 'as_original' | 'user_added' | 'admin_added';
 
 export interface Task {

@@ -2,6 +2,20 @@
 
 เอกสารนี้บันทึก design และ implementation notes สำหรับ user-added tasks ทั้งแบบ bulk import และ manual add-subtask UX ไม่มีการสร้าง migration ใหม่ และไม่มีการเปลี่ยน RLS หรือ `MAINTENANCE_MODE`
 
+## 2026-09-09 Update: XLSX Template Validation
+
+ปรับ bulk added-task template ให้ใช้ XLSX dropdown validation จริง โดยสร้าง workbook ด้วย `xlsx` แล้ว patch worksheet XML ด้วย `jszip` เฉพาะตอน download template ส่วน import ยังอ่านไฟล์ด้วย parser เดิมและ validate ทุก row ก่อน insert
+
+สิ่งที่ปรับ:
+
+- เพิ่ม dropdown ในไฟล์ XLSX สำหรับ `เลือกงานหลักจาก AS`, `สถานะ`, `Priority`, และ `Work Type`
+- เพิ่ม hidden sheet `_LOOKUP` สำหรับ allowed status, priority, และ work type values
+- คง hidden sheet `_SYSTEM_PARENT_MAP` สำหรับ map parent label กลับเป็น `parent_task_id`
+- เพิ่ม validation ฝั่ง import ให้ reject status/priority/work_type ที่ไม่อยู่ใน allowed list
+- date string ต้องเป็น `YYYY-MM-DD` เช่น `2026-09-09`; Excel date object/serial ที่ valid จะถูก normalize เป็น `YYYY-MM-DD`
+- ถ้า due date ก่อน start date จะเป็น error และไม่ import
+- ยังคง override protected fields เองตอน insert: `task_source = user_added`, `counts_toward_assessment = false`, `include_in_ai_summary = true`, `weight = 0`, `assignee = current user's display_name`
+
 ## เป้าหมาย
 
 ออกแบบ workflow ให้พนักงานสามารถ bulk upload งานย่อยเพิ่มเติมภายใต้งาน AS เดิมของตนเองได้ผ่าน personalized XLSX template
@@ -35,7 +49,7 @@
 
 ### Manual Add Subtask UX
 
-หน้า Task Tracking หลักมีปุ่ม `+ Create Subtask` บน task ที่เป็น original AS task:
+หน้า Task Tracking หลักมีปุ่ม `+ Add subtask` บน task ที่เป็น original AS task:
 
 - แสดงเฉพาะ `task_source = as_original`
 - สำหรับ role `user` แสดงเฉพาะ task ที่ `assignee = profiles.display_name` ของ user ปัจจุบัน
@@ -59,6 +73,14 @@
 - งานที่เพิ่มเองไม่ถูกนับใน official assessment scoring
 - Original AS parent ยังอยู่ใน official evaluation เหมือนเดิม เพราะ child ที่เพิ่มเองถูก set `counts_toward_assessment = false`
 - AI summary ยังสามารถอ่าน user-added tasks เป็น supplementary evidence ได้ผ่าน `include_in_ai_summary = true`
+
+2026-08-27 note:
+
+- เพิ่มตัวเลือก `frequency_unit` ใน TaskModal อีก 2 ค่า: `academic_year` และ `semester`
+- Dropdown `หน่วย` แสดง 4 ตัวเลือก: `ต่อปี`, `ต่อเดือน`, `ต่อปีการศึกษา`, `ต่อภาคการศึกษา`
+- อัปเดต display label ใน modal และ Gantt label ให้แสดงหน่วยใหม่ได้
+- ไม่พบ database CHECK constraint สำหรับ `tasks.frequency_unit` ใน repo migrations จึงไม่เพิ่ม migration
+- ไม่แก้ `MAINTENANCE_MODE`, RLS, import schema หรือ logic อื่นที่ไม่เกี่ยวข้อง
 
 ### Bulk Import UX
 
@@ -96,11 +118,12 @@
 added-task-template-[display_name]-[YYYYMMDD].xlsx
 ```
 
-Workbook มี 3 sheets:
+Workbook มี 4 sheets:
 
-1. `เพิ่มงานย่อย`
+1. `+ Create Subtask`
 2. `คำแนะนำ`
 3. `_SYSTEM_PARENT_MAP`
+4. `_LOOKUP`
 
 ## Sheet 1: เพิ่มงานย่อย
 
@@ -115,7 +138,9 @@ Columns:
 | `รายละเอียด` | no | รายละเอียดงาน |
 | `วันเริ่ม` | no | วันที่เริ่มงาน แนะนำ `YYYY-MM-DD` |
 | `วันครบกำหนด` | no | วันที่ครบกำหนด แนะนำ `YYYY-MM-DD` |
-| `สถานะ` | no | สถานะงาน ต้อง map กับ allowed app status |
+| `สถานะ` | no | Dropdown allowed app status |
+| `Priority` | no | Dropdown `Low`, `Medium`, `High` |
+| `Work Type` | no | Dropdown work type value เช่น `routine`, `strategic` |
 | `ความคืบหน้า %` | no | ตัวเลข 0-100 |
 | `สรุปความคืบหน้า` | no | คำอธิบาย progress |
 | `client_ref` | no | รหัสอ้างอิงจาก user เพื่อช่วยเตือน duplicate |
@@ -152,13 +177,13 @@ Sheet นี้ user เห็นได้ เป็นคู่มือใน�
 เนื้อหาที่ควรมี:
 
 1. 1 row = 1 added child task
-2. เลือกงานหลักจาก AS จาก dropdown เท่านั้น
+2. เลือกงานหลักจาก AS, สถานะ, Priority, และ Work Type จาก dropdown เท่านั้น
 3. กรอกชื่องานย่อยใน column `งานย่อยที่ต้องการเพิ่ม`
 4. งานที่เพิ่มจะไม่กระทบคะแนนประเมินอย่างเป็นทางการ
 5. งานที่เพิ่มอาจถูกใช้เป็น evidence สำหรับ AI summary
 6. ห้ามแก้ sheet ระบบ
-7. แนะนำ date format เป็น `YYYY-MM-DD`
-8. ถ้าไม่แน่ใจเรื่องสถานะ ให้เว้นว่างหรือใช้ default ที่ระบบกำหนด
+7. date format ต้องเป็น `YYYY-MM-DD` เช่น `2026-09-09`
+8. ถ้าไม่แน่ใจเรื่องสถานะหรือ priority ให้เว้นว่างเพื่อใช้ default ของระบบ
 9. ถ้าต้องการป้องกัน import ซ้ำ ให้ใส่ `client_ref`
 
 ข้อความตัวอย่าง:
@@ -191,6 +216,25 @@ Columns:
 - ถึง sheet จะ hidden/protected ก็ห้ามเชื่อข้อมูลในไฟล์โดยตรง
 - ตอน import ต้อง verify parent task จาก database อีกครั้ง
 - ถ้า user แก้ sheet ระบบ ต้อง reject หรือ ignore ตาม validation
+
+## Sheet 4: _LOOKUP
+
+Sheet นี้ hidden และใช้เป็น source ของ dropdown validation ใน Excel
+
+Columns:
+
+| Column | ความหมาย |
+| --- | --- |
+| `allowed_status` | allowed task status values |
+| `allowed_priority` | allowed priority values |
+| `allowed_work_type` | allowed work type values |
+| `work_type_label` | label ภาษาไทยสำหรับ maintainer ดูประกอบ |
+
+Allowed values ปัจจุบัน:
+
+- Status: `To Do`, `In Progress`, `Blocked`, `In problem Need Help`, `Done`
+- Priority: `Low`, `Medium`, `High`
+- Work Type: `routine`, `strategic`, `process_improvement`, `self_development`, `other`
 
 ## Import Workflow
 
@@ -231,6 +275,8 @@ Columns ใน preview:
 - Start date
 - Due date
 - Status
+- Priority
+- Work Type
 - Progress %
 - Progress summary
 - client_ref
@@ -246,6 +292,8 @@ Columns ใน preview:
 - `ความคืบหน้าต้องอยู่ระหว่าง 0-100`
 - `รูปแบบวันที่ไม่ถูกต้อง กรุณาใช้ YYYY-MM-DD`
 - `สถานะงานไม่อยู่ในรายการที่ระบบรองรับ`
+- `priority "..." is invalid. Please choose one of: Low, Medium, High.`
+- `work_type "..." is invalid. Please choose one of: routine, strategic, process_improvement, self_development, other.`
 
 ## Critical Validation Rules
 
@@ -260,12 +308,14 @@ Columns ใน preview:
 7. `งานย่อยที่ต้องการเพิ่ม` ต้องไม่ว่าง
 8. `ความคืบหน้า %` ถ้ามี ต้อง parse เป็น numeric ได้
 9. progress ต้องอยู่ในช่วง 0-100
-10. `สถานะ` ถ้ามี ต้อง map เป็น allowed app status ได้
+10. `สถานะ` ถ้ามี ต้องตรงกับ allowed app status
 11. `วันเริ่ม` ถ้ามี ต้อง parse เป็น date ได้
 12. `วันครบกำหนด` ถ้ามี ต้อง parse เป็น date ได้
-13. ถ้ามีทั้ง start/end date ควรเตือนถ้า start date หลัง due date
+13. ถ้ามีทั้ง start/end date ต้อง reject ถ้า start date หลัง due date
 14. Import ต้อง reject row ที่พยายาม attach ไป parent task ของคนอื่น
 15. Import ต้อง ignore/override fields ที่เกี่ยวกับ assessment/security
+16. `Priority` ถ้ามีต้องตรงกับ allowed priority
+17. `Work Type` ถ้ามีต้องตรงกับ allowed work type value
 
 ห้ามใช้ค่าจาก template เพื่อ set fields เหล่านี้:
 
@@ -283,17 +333,18 @@ Columns ใน preview:
 
 ## Status Mapping
 
-ควร map สถานะจาก template เป็น allowed app status
+สถานะจาก template ต้องเป็น allowed app status แบบ exact value
 
 ตัวอย่าง design:
 
 | Input | DB status |
 | --- | --- |
-| blank | default เช่น `todo` หรือ existing default ของ app |
-| `ยังไม่เริ่ม` | `todo` |
-| `กำลังดำเนินการ` | `in_progress` |
-| `เสร็จแล้ว` | `done` |
-| existing English app status | ใช้ค่าที่ map แล้ว |
+| blank | default `To Do` |
+| `To Do` | `To Do` |
+| `In Progress` | `In Progress` |
+| `Blocked` | `Blocked` |
+| `In problem Need Help` | `In problem Need Help` |
+| `Done` | `Done` |
 
 หมายเหตุ:
 
@@ -314,6 +365,7 @@ Mapping:
 | `start_date` | `วันเริ่ม` |
 | `end_date` | `วันครบกำหนด` |
 | `status` | mapped status |
+| `priority` | `Priority` ถ้ามี; default `Medium` |
 | `progress` | `ความคืบหน้า %` |
 | `progress_summary` | `สรุปความคืบหน้า` |
 | `assignee` | current user's `profiles.display_name` |
@@ -321,7 +373,7 @@ Mapping:
 | `counts_toward_assessment` | `false` |
 | `include_in_ai_summary` | `true` |
 | `weight` | `0` |
-| `priority` | default medium unless template includes priority later |
+| `work_type` | `Work Type` ถ้ามี; default จาก parent work type หรือ `routine` |
 
 ถ้า app ใช้ field name ต่างกัน เช่น `end_date` แทน due date ให้ map ตาม schema จริงตอน implement
 

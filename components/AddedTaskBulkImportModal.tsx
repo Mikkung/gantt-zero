@@ -37,6 +37,7 @@ type PreviewRow = {
   startDate: string | null;
   endDate: string | null;
   status: Task['status'];
+  priority: Task['priority'];
   progress: number;
   progressSummary: string | null;
   clientRef: string;
@@ -49,6 +50,8 @@ type PreviewRow = {
 const TASK_SHEET_NAME = '+ Create Subtask';
 const INSTRUCTION_SHEET_NAME = 'คำแนะนำ';
 const SYSTEM_PARENT_MAP_SHEET_NAME = '_SYSTEM_PARENT_MAP';
+const LOOKUP_SHEET_NAME = '_LOOKUP';
+const TEMPLATE_MIN_DATA_ROWS = 200;
 
 const TASK_TEMPLATE_HEADERS = [
   'เลือกงานหลักจาก AS',
@@ -57,7 +60,19 @@ const TASK_TEMPLATE_HEADERS = [
   'วันเริ่ม',
   'วันครบกำหนด',
   'สถานะ',
+  'Priority',
+  'Work Type',
   'ความคืบหน้า %',
+  'สรุปความคืบหน้า',
+  'client_ref',
+];
+
+const USER_INPUT_HEADERS = [
+  'เลือกงานหลักจาก AS',
+  'งานย่อยที่ต้องการเพิ่ม',
+  'รายละเอียด',
+  'วันเริ่ม',
+  'วันครบกำหนด',
   'สรุปความคืบหน้า',
   'client_ref',
 ];
@@ -71,27 +86,32 @@ const SYSTEM_PARENT_MAP_HEADERS = [
   'task_source',
 ];
 
-const STATUS_MAP: Record<string, Task['status']> = {
-  '': 'To Do',
-  todo: 'To Do',
-  'to do': 'To Do',
-  'ยังไม่เริ่ม': 'To Do',
-  'in progress': 'In Progress',
-  inprogress: 'In Progress',
-  doing: 'In Progress',
-  'กำลังดำเนินการ': 'In Progress',
-  blocked: 'Blocked',
-  block: 'Blocked',
-  'ติดปัญหา': 'Blocked',
-  'in problem need help': 'In problem Need Help',
-  'in problem - need help': 'In problem Need Help',
-  'in problem – need help': 'In problem Need Help',
-  'ต้องการความช่วยเหลือ': 'In problem Need Help',
-  done: 'Done',
-  complete: 'Done',
-  completed: 'Done',
-  'เสร็จแล้ว': 'Done',
-};
+const LOOKUP_HEADERS = [
+  'allowed_status',
+  'allowed_priority',
+  'allowed_work_type',
+  'work_type_label',
+];
+
+const ALLOWED_TASK_STATUSES: Task['status'][] = [
+  'To Do',
+  'In Progress',
+  'Blocked',
+  'In problem Need Help',
+  'Done',
+];
+
+const ALLOWED_TASK_PRIORITIES: Task['priority'][] = ['Low', 'Medium', 'High'];
+
+const WORK_TYPE_OPTIONS: Array<{ value: WorkType; label: string }> = [
+  { value: 'routine', label: 'งานประจำ' },
+  { value: 'strategic', label: 'งานยุทธศาสตร์' },
+  { value: 'process_improvement', label: 'งานพัฒนากระบวนการ' },
+  { value: 'self_development', label: 'งานพัฒนาตนเอง' },
+  { value: 'other', label: 'งานอื่นๆ' },
+];
+
+const ALLOWED_WORK_TYPES = WORK_TYPE_OPTIONS.map((option) => option.value);
 
 function normalizeCell(value: unknown) {
   if (value === null || value === undefined) return '';
@@ -112,49 +132,71 @@ function getTodayFilePart() {
   return `${year}${month}${day}`;
 }
 
+function formatDateParts(year: number, month: number, day: number) {
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(
+    2,
+    '0',
+  )}-${String(day).padStart(2, '0')}`;
+}
+
+function isValidDateParts(year: number, month: number, day: number) {
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
 function parseDateValue(value: unknown): { value: string | null; error?: string } {
   if (value === null || value === undefined || value === '') {
     return { value: null };
   }
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return { value: value.toISOString().slice(0, 10) };
+    return {
+      value: formatDateParts(
+        value.getFullYear(),
+        value.getMonth() + 1,
+        value.getDate(),
+      ),
+    };
   }
 
   if (typeof value === 'number') {
     const parsed = XLSX.SSF.parse_date_code(value);
-    if (parsed) {
-      const year = String(parsed.y).padStart(4, '0');
-      const month = String(parsed.m).padStart(2, '0');
-      const day = String(parsed.d).padStart(2, '0');
-      return { value: `${year}-${month}-${day}` };
+    if (
+      parsed &&
+      isValidDateParts(Number(parsed.y), Number(parsed.m), Number(parsed.d))
+    ) {
+      return {
+        value: formatDateParts(Number(parsed.y), Number(parsed.m), Number(parsed.d)),
+      };
     }
   }
 
   const raw = normalizeCell(value);
   if (!raw) return { value: null };
 
-  const normalized = raw.replace(/\//g, '-');
-  const ymd = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (ymd) {
     const [, year, month, day] = ymd;
-    const date = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-    );
-    if (
-      date.getFullYear() === Number(year) &&
-      date.getMonth() === Number(month) - 1 &&
-      date.getDate() === Number(day)
-    ) {
-      return {
-        value: `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`,
-      };
+    if (isValidDateParts(Number(year), Number(month), Number(day))) {
+      return { value: raw };
     }
   }
 
-  return { value: null, error: `รูปแบบวันที่ไม่ถูกต้อง: ${raw}` };
+  if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(raw) || raw.includes('/')) {
+    return {
+      value: null,
+      error: `date "${raw}" is ambiguous. Please use YYYY-MM-DD, e.g. 2026-09-09.`,
+    };
+  }
+
+  return {
+    value: null,
+    error: `date "${raw}" is invalid. Please use YYYY-MM-DD, e.g. 2026-09-09.`,
+  };
 }
 
 function parseProgress(value: unknown): { value: number; error?: string } {
@@ -174,31 +216,76 @@ function parseProgress(value: unknown): { value: number; error?: string } {
 
 function parseStatus(value: unknown): { value: Task['status']; error?: string } {
   const raw = normalizeCell(value);
-  const mapped = STATUS_MAP[raw.toLowerCase()] ?? STATUS_MAP[raw];
-  if (mapped) return { value: mapped };
+  if (!raw) return { value: 'To Do' };
+  if (ALLOWED_TASK_STATUSES.includes(raw as Task['status'])) {
+    return { value: raw as Task['status'] };
+  }
+
   return {
     value: 'To Do',
-    error: `สถานะงานไม่อยู่ในรายการที่ระบบรองรับ: ${raw}`,
+    error: `status "${raw}" is invalid. Please choose one of: ${ALLOWED_TASK_STATUSES.join(
+      ', ',
+    )}.`,
+  };
+}
+
+function parsePriority(value: unknown): { value: Task['priority']; error?: string } {
+  const raw = normalizeCell(value);
+  if (!raw) return { value: 'Medium' };
+  if (ALLOWED_TASK_PRIORITIES.includes(raw as Task['priority'])) {
+    return { value: raw as Task['priority'] };
+  }
+
+  return {
+    value: 'Medium',
+    error: `priority "${raw}" is invalid. Please choose one of: ${ALLOWED_TASK_PRIORITIES.join(
+      ', ',
+    )}.`,
+  };
+}
+
+function parseWorkType(
+  value: unknown,
+  fallback: WorkType,
+): { value: WorkType; error?: string } {
+  const raw = normalizeCell(value);
+  if (!raw) return { value: fallback };
+  if (ALLOWED_WORK_TYPES.includes(raw as WorkType)) {
+    return { value: raw as WorkType };
+  }
+
+  return {
+    value: fallback,
+    error: `work_type "${raw}" is invalid. Please choose one of: ${ALLOWED_WORK_TYPES.join(
+      ', ',
+    )}.`,
   };
 }
 
 function normalizeWorkType(value: unknown): WorkType {
   const raw = normalizeCell(value);
-  if (
-    raw === 'routine' ||
-    raw === 'strategic' ||
-    raw === 'process_improvement' ||
-    raw === 'self_development' ||
-    raw === 'other'
-  ) {
-    return raw;
-  }
-
-  return 'routine';
+  return ALLOWED_WORK_TYPES.includes(raw as WorkType)
+    ? (raw as WorkType)
+    : 'routine';
 }
 
 function isBlankImportRow(row: Record<string, unknown>) {
-  return TASK_TEMPLATE_HEADERS.every((header) => !normalizeCell(row[header]));
+  const hasUserInput = USER_INPUT_HEADERS.some(
+    (header) => !!normalizeCell(row[header]),
+  );
+  if (hasUserInput) return false;
+
+  const status = normalizeCell(row['สถานะ']);
+  const priority = normalizeCell(row.Priority);
+  const workType = normalizeCell(row['Work Type']);
+  const progress = normalizeCell(row['ความคืบหน้า %']);
+
+  return (
+    (!status || status === 'To Do') &&
+    (!priority || priority === 'Medium') &&
+    (!workType || workType === 'routine') &&
+    (!progress || progress === '0' || progress === '0%')
+  );
 }
 
 function makeRowsForTemplate(parentMapRows: ParentMapRow[]) {
@@ -212,6 +299,8 @@ function makeRowsForTemplate(parentMapRows: ParentMapRow[]) {
       วันเริ่ม: '',
       วันครบกำหนด: '',
       สถานะ: 'To Do',
+      Priority: 'Medium',
+      'Work Type': parentRow.parent_work_type || 'routine',
       'ความคืบหน้า %': '0',
       สรุปความคืบหน้า: '',
       client_ref: '',
@@ -226,6 +315,8 @@ function makeRowsForTemplate(parentMapRows: ParentMapRow[]) {
       วันเริ่ม: '',
       วันครบกำหนด: '',
       สถานะ: 'To Do',
+      Priority: 'Medium',
+      'Work Type': 'routine',
       'ความคืบหน้า %': '0',
       สรุปความคืบหน้า: '',
       client_ref: '',
@@ -233,6 +324,144 @@ function makeRowsForTemplate(parentMapRows: ParentMapRow[]) {
   }
 
   return rows;
+}
+
+function makeLookupRows() {
+  const rowCount = Math.max(
+    ALLOWED_TASK_STATUSES.length,
+    ALLOWED_TASK_PRIORITIES.length,
+    WORK_TYPE_OPTIONS.length,
+  );
+
+  return Array.from({ length: rowCount }, (_, index) => ({
+    allowed_status: ALLOWED_TASK_STATUSES[index] ?? '',
+    allowed_priority: ALLOWED_TASK_PRIORITIES[index] ?? '',
+    allowed_work_type: WORK_TYPE_OPTIONS[index]?.value ?? '',
+    work_type_label: WORK_TYPE_OPTIONS[index]?.label ?? '',
+  }));
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+type SheetValidationRule = {
+  sqref: string;
+  type: 'list' | 'date' | 'decimal';
+  formula1: string;
+  formula2?: string;
+  allowBlank?: boolean;
+  operator?: 'between';
+  errorTitle: string;
+  error: string;
+};
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function createDataValidationsXml(rules: SheetValidationRule[]) {
+  const entries = rules.map((rule) => {
+    const operator = rule.operator ? ` operator="${rule.operator}"` : '';
+    const formula2 = rule.formula2
+      ? `<formula2>${escapeXml(rule.formula2)}</formula2>`
+      : '';
+
+    return [
+      `<dataValidation type="${rule.type}" allowBlank="${
+        rule.allowBlank ? 1 : 0
+      }" showErrorMessage="1" errorStyle="stop"${operator} sqref="${escapeXml(
+        rule.sqref,
+      )}" errorTitle="${escapeXml(rule.errorTitle)}" error="${escapeXml(
+        rule.error,
+      )}">`,
+      `<formula1>${escapeXml(rule.formula1)}</formula1>`,
+      formula2,
+      '</dataValidation>',
+    ].join('');
+  });
+
+  return `<dataValidations count="${rules.length}">${entries.join(
+    '',
+  )}</dataValidations>`;
+}
+
+function addDataValidationsToSheetXml(
+  sheetXml: string,
+  rules: SheetValidationRule[],
+) {
+  const withoutExistingRules = sheetXml.replace(
+    /<dataValidations[\s\S]*?<\/dataValidations>/,
+    '',
+  );
+  const validationXml = createDataValidationsXml(rules);
+  const insertBeforeTags = [
+    '<hyperlinks',
+    '<printOptions',
+    '<pageMargins',
+    '<pageSetup',
+    '<headerFooter',
+    '<ignoredErrors',
+    '</worksheet>',
+  ];
+
+  for (const tag of insertBeforeTags) {
+    const index = withoutExistingRules.indexOf(tag);
+    if (index >= 0) {
+      return `${withoutExistingRules.slice(
+        0,
+        index,
+      )}${validationXml}${withoutExistingRules.slice(index)}`;
+    }
+  }
+
+  return withoutExistingRules;
+}
+
+async function downloadWorkbookWithValidation(
+  workbook: XLSX.WorkBook,
+  taskSheetValidationRules: SheetValidationRule[],
+  fileName: string,
+) {
+  const workbookBuffer = XLSX.write(workbook, {
+    bookType: 'xlsx',
+    type: 'array',
+  });
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(workbookBuffer);
+  const taskSheetPath = 'xl/worksheets/sheet1.xml';
+  const taskSheetFile = zip.file(taskSheetPath);
+
+  if (!taskSheetFile) {
+    throw new Error('Cannot find task worksheet in XLSX package.');
+  }
+
+  const taskSheetXml = await taskSheetFile.async('string');
+  zip.file(
+    taskSheetPath,
+    addDataValidationsToSheetXml(taskSheetXml, taskSheetValidationRules),
+  );
+
+  const patchedWorkbook = await zip.generateAsync({
+    type: 'arraybuffer',
+    compression: 'DEFLATE',
+  });
+  const blob = new Blob([patchedWorkbook], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  downloadBlob(blob, fileName);
 }
 
 export default function AddedTaskBulkImportModal({
@@ -250,6 +479,7 @@ export default function AddedTaskBulkImportModal({
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const eligibleParents = useMemo(
@@ -299,7 +529,7 @@ export default function AddedTaskBulkImportModal({
     });
   };
 
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
     if (!currentProfile?.display_name) {
       alert('Cannot read your profile. Please sign in again.');
       return;
@@ -318,77 +548,170 @@ export default function AddedTaskBulkImportModal({
       task_source: 'as_original',
     }));
 
-    const workbook = XLSX.utils.book_new();
-    const taskSheet = XLSX.utils.json_to_sheet(
-      makeRowsForTemplate(parentMapRows),
-      { header: TASK_TEMPLATE_HEADERS },
-    );
-    taskSheet['!cols'] = [
-      { wch: 48 },
-      { wch: 32 },
-      { wch: 36 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 18 },
-      { wch: 14 },
-      { wch: 36 },
-      { wch: 18 },
-    ];
-    (taskSheet as any)['!dataValidation'] = [
-      {
-        sqref: `A2:A${Math.max(200, parentMapRows.length + 25)}`,
-        type: 'list',
-        formulas: [
-          `'${SYSTEM_PARENT_MAP_SHEET_NAME}'!$A$2:$A$${parentMapRows.length + 1}`,
-        ],
-      },
-    ];
-
-    const instructionSheet = XLSX.utils.aoa_to_sheet([
-      ['คำแนะนำการเพิ่มงานย่อย'],
-      ['1 row = 1 added child task'],
-      ['เลือกงานหลักจาก AS จาก dropdown หรือใช้ label ที่มีใน template เท่านั้น'],
-      ['กรอกชื่องานย่อยใน column "งานย่อยที่ต้องการเพิ่ม"'],
-      ['งานที่เพิ่มจะไม่กระทบคะแนนประเมินอย่างเป็นทางการ'],
-      ['งานที่เพิ่มอาจถูกใช้เป็นหลักฐานประกอบ AI summary'],
-      ['กรุณาอย่าแก้ไข sheet ที่ขึ้นต้นด้วย _SYSTEM'],
-      ['แนะนำรูปแบบวันที่ YYYY-MM-DD'],
-      ['ถ้าต้องการช่วยตรวจ import ซ้ำ ให้ใส่ client_ref'],
-    ]);
-    instructionSheet['!cols'] = [{ wch: 96 }];
-
-    const systemSheet = XLSX.utils.json_to_sheet(parentMapRows, {
-      header: SYSTEM_PARENT_MAP_HEADERS,
-    });
-    systemSheet['!cols'] = [
-      { wch: 48 },
-      { wch: 38 },
-      { wch: 36 },
-      { wch: 20 },
-      { wch: 24 },
-      { wch: 16 },
-    ];
-
-    XLSX.utils.book_append_sheet(workbook, taskSheet, TASK_SHEET_NAME);
-    XLSX.utils.book_append_sheet(
-      workbook,
-      instructionSheet,
-      INSTRUCTION_SHEET_NAME,
-    );
-    XLSX.utils.book_append_sheet(
-      workbook,
-      systemSheet,
-      SYSTEM_PARENT_MAP_SHEET_NAME,
-    );
-    workbook.Workbook = {
-      Sheets: [{ Hidden: 0 }, { Hidden: 0 }, { Hidden: 1 }],
-    };
-
     const fileName = `added-task-template-${currentProfile.display_name.replace(
       /[\\/:*?"<>|\s]+/g,
       '-',
     )}-${getTodayFilePart()}.xlsx`;
-    XLSX.writeFile(workbook, fileName);
+
+    setDownloadingTemplate(true);
+    try {
+      const workbook = XLSX.utils.book_new();
+      const taskSheet = XLSX.utils.json_to_sheet(
+        makeRowsForTemplate(parentMapRows),
+        { header: TASK_TEMPLATE_HEADERS },
+      );
+      taskSheet['!cols'] = [
+        { wch: 48 },
+        { wch: 32 },
+        { wch: 36 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 14 },
+        { wch: 36 },
+        { wch: 18 },
+      ];
+      taskSheet['!freeze'] = { xSplit: 0, ySplit: 1 };
+
+      const instructionSheet = XLSX.utils.aoa_to_sheet([
+        ['คำแนะนำการเพิ่มงานย่อย'],
+        ['1 row = 1 added child task'],
+        ['เลือกงานหลักจาก AS, สถานะ, Priority และ Work Type จาก dropdown'],
+        ['กรอกชื่องานย่อยใน column "งานย่อยที่ต้องการเพิ่ม"'],
+        ['วันที่ให้ใช้รูปแบบ YYYY-MM-DD เช่น 2026-09-09'],
+        ['งานที่เพิ่มจะไม่กระทบคะแนนประเมินอย่างเป็นทางการ'],
+        ['งานที่เพิ่มอาจถูกใช้เป็นหลักฐานประกอบ AI summary'],
+        ['กรุณาอย่าแก้ไข sheet ที่ขึ้นต้นด้วย _SYSTEM หรือ _LOOKUP'],
+        ['ถ้าต้องการช่วยตรวจ import ซ้ำ ให้ใส่ client_ref'],
+      ]);
+      instructionSheet['!cols'] = [{ wch: 104 }];
+
+      const systemSheet = XLSX.utils.json_to_sheet(parentMapRows, {
+        header: SYSTEM_PARENT_MAP_HEADERS,
+      });
+      systemSheet['!cols'] = [
+        { wch: 48 },
+        { wch: 38 },
+        { wch: 36 },
+        { wch: 20 },
+        { wch: 24 },
+        { wch: 16 },
+      ];
+
+      const lookupSheet = XLSX.utils.json_to_sheet(makeLookupRows(), {
+        header: LOOKUP_HEADERS,
+      });
+      lookupSheet['!cols'] = [
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 24 },
+        { wch: 28 },
+      ];
+
+      XLSX.utils.book_append_sheet(workbook, taskSheet, TASK_SHEET_NAME);
+      XLSX.utils.book_append_sheet(
+        workbook,
+        instructionSheet,
+        INSTRUCTION_SHEET_NAME,
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        systemSheet,
+        SYSTEM_PARENT_MAP_SHEET_NAME,
+      );
+      XLSX.utils.book_append_sheet(workbook, lookupSheet, LOOKUP_SHEET_NAME);
+      workbook.Workbook = {
+        Sheets: [
+          { Hidden: 0 },
+          { Hidden: 0 },
+          { Hidden: 2 },
+          { Hidden: 2 },
+        ],
+      };
+
+      const lastRow = Math.max(
+        TEMPLATE_MIN_DATA_ROWS + 1,
+        parentMapRows.length + 26,
+      );
+      const parentListFormula = `'${SYSTEM_PARENT_MAP_SHEET_NAME}'!$A$2:$A$${
+        parentMapRows.length + 1
+      }`;
+      const statusListFormula = `'${LOOKUP_SHEET_NAME}'!$A$2:$A$${
+        ALLOWED_TASK_STATUSES.length + 1
+      }`;
+      const priorityListFormula = `'${LOOKUP_SHEET_NAME}'!$B$2:$B$${
+        ALLOWED_TASK_PRIORITIES.length + 1
+      }`;
+      const workTypeListFormula = `'${LOOKUP_SHEET_NAME}'!$C$2:$C$${
+        WORK_TYPE_OPTIONS.length + 1
+      }`;
+
+      await downloadWorkbookWithValidation(
+        workbook,
+        [
+          {
+            sqref: `A2:A${lastRow}`,
+            type: 'list',
+            allowBlank: false,
+            formula1: parentListFormula,
+            errorTitle: 'Invalid parent task',
+            error: 'Please choose an AS parent task from the dropdown.',
+          },
+          {
+            sqref: `D2:E${lastRow}`,
+            type: 'date',
+            operator: 'between',
+            allowBlank: true,
+            formula1: 'DATE(2000,1,1)',
+            formula2: 'DATE(2100,12,31)',
+            errorTitle: 'Invalid date',
+            error: 'Please use YYYY-MM-DD, e.g. 2026-09-09.',
+          },
+          {
+            sqref: `F2:F${lastRow}`,
+            type: 'list',
+            allowBlank: true,
+            formula1: statusListFormula,
+            errorTitle: 'Invalid status',
+            error: 'Please choose a status from the dropdown.',
+          },
+          {
+            sqref: `G2:G${lastRow}`,
+            type: 'list',
+            allowBlank: true,
+            formula1: priorityListFormula,
+            errorTitle: 'Invalid priority',
+            error: 'Please choose a priority from the dropdown.',
+          },
+          {
+            sqref: `H2:H${lastRow}`,
+            type: 'list',
+            allowBlank: true,
+            formula1: workTypeListFormula,
+            errorTitle: 'Invalid work type',
+            error: 'Please choose a work type from the dropdown.',
+          },
+          {
+            sqref: `I2:I${lastRow}`,
+            type: 'decimal',
+            operator: 'between',
+            allowBlank: true,
+            formula1: '0',
+            formula2: '100',
+            errorTitle: 'Invalid progress',
+            error: 'Progress must be a number from 0 to 100.',
+          },
+        ],
+        fileName,
+      );
+    } catch (error) {
+      console.error('Added task template download error:', error);
+      alert('Cannot create XLSX template. Please try again.');
+    } finally {
+      setDownloadingTemplate(false);
+    }
   };
 
   const handlePreviewFile = async (file: File) => {
@@ -492,6 +815,8 @@ export default function AddedTaskBulkImportModal({
           const dbParent = mapRow
             ? dbParentMap.get(mapRow.parent_task_id)
             : undefined;
+          const fallbackWorkType =
+            dbParent?.work_type ?? normalizeWorkType(mapRow?.parent_work_type);
 
           if (!parentLabel) {
             messages.push('กรุณาเลือกงานหลักจาก AS');
@@ -534,8 +859,8 @@ export default function AddedTaskBulkImportModal({
             endDate.value &&
             startDate.value > endDate.value
           ) {
-            messages.push('วันเริ่มอยู่หลังวันครบกำหนด กรุณาตรวจสอบ');
-            if (result !== 'error') result = 'warning';
+            messages.push('due_date must not be earlier than start_date.');
+            result = 'error';
           }
 
           const progress = parseProgress(row['ความคืบหน้า %']);
@@ -547,6 +872,18 @@ export default function AddedTaskBulkImportModal({
           const status = parseStatus(row['สถานะ']);
           if (status.error) {
             messages.push(status.error);
+            result = 'error';
+          }
+
+          const priority = parsePriority(row.Priority);
+          if (priority.error) {
+            messages.push(priority.error);
+            result = 'error';
+          }
+
+          const workType = parseWorkType(row['Work Type'], fallbackWorkType);
+          if (workType.error) {
+            messages.push(workType.error);
             result = 'error';
           }
 
@@ -583,11 +920,11 @@ export default function AddedTaskBulkImportModal({
             startDate: startDate.value,
             endDate: endDate.value,
             status: status.value,
+            priority: priority.value,
             progress: progress.value,
             progressSummary,
             clientRef,
-            workType:
-              dbParent?.work_type ?? normalizeWorkType(mapRow?.parent_work_type),
+            workType: workType.value,
             teamId: dbParent?.team_id ?? currentProfile.team_id ?? null,
             result,
             messages,
@@ -624,7 +961,7 @@ export default function AddedTaskBulkImportModal({
         start_date: row.startDate,
         end_date: row.endDate,
         status: row.status,
-        priority: 'Medium',
+        priority: row.priority,
         progress: row.progress,
         progress_summary: row.progressSummary,
         assignee: currentProfile.display_name,
@@ -795,6 +1132,8 @@ export default function AddedTaskBulkImportModal({
                           <th>Parent AS task</th>
                           <th>Added task</th>
                           <th>Status</th>
+                          <th>Priority</th>
+                          <th>Work Type</th>
                           <th>Progress</th>
                           <th>Result</th>
                           <th>Message</th>
@@ -807,6 +1146,8 @@ export default function AddedTaskBulkImportModal({
                             <td>{row.parentLabel}</td>
                             <td>{row.childName}</td>
                             <td>{row.status}</td>
+                            <td>{row.priority}</td>
+                            <td>{row.workType}</td>
                             <td>{row.progress}%</td>
                             <td>{row.result}</td>
                             <td>{row.messages.join(' | ') || '-'}</td>
@@ -835,9 +1176,11 @@ export default function AddedTaskBulkImportModal({
                 type="button"
                 className="btn btn-primary"
                 onClick={handleDownloadTemplate}
-                disabled={selectedParents.length === 0}
+                disabled={selectedParents.length === 0 || downloadingTemplate}
               >
-                Download Added Task Template
+                {downloadingTemplate
+                  ? 'Creating Template…'
+                  : 'Download Added Task Template'}
               </button>
             ) : (
               <button

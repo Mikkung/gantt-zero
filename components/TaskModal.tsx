@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Task, Profile, TaskSource } from '../types';
+import type { Task, Profile, TaskFrequencyUnit, TaskSource } from '../types';
 import { generateDeterministicProgressSummary } from '../utils/taskProgress';
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
 
@@ -21,6 +21,28 @@ const WORK_TYPE_OPTIONS: { value: WorkType; label: string }[] = [
   { value: 'self_development', label: 'งานพัฒนาตนเอง' },
   { value: 'other', label: 'งานอื่นๆ' },
 ];
+
+const FREQUENCY_UNIT_OPTIONS: Array<{
+  value: TaskFrequencyUnit;
+  label: string;
+  shortLabel: string;
+}> = [
+  { value: 'year', label: 'ต่อปี', shortLabel: 'ปี' },
+  { value: 'month', label: 'ต่อเดือน', shortLabel: 'เดือน' },
+  {
+    value: 'academic_year',
+    label: 'ต่อปีการศึกษา',
+    shortLabel: 'ปีการศึกษา',
+  },
+  { value: 'semester', label: 'ต่อภาคการศึกษา', shortLabel: 'ภาคการศึกษา' },
+];
+
+function getFrequencyUnitShortLabel(value: TaskFrequencyUnit) {
+  return (
+    FREQUENCY_UNIT_OPTIONS.find((option) => option.value === value)
+      ?.shortLabel ?? value
+  );
+}
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -92,7 +114,8 @@ export default function TaskModal({
   // เพิ่ม ผลผลิต / ความถี่ / เวลาที่ใช้
   const [output, setOutput] = useState('');
   const [frequencyCount, setFrequencyCount] = useState<number | ''>('');
-  const [frequencyUnit, setFrequencyUnit] = useState<'month' | 'year'>('month');
+  const [frequencyUnit, setFrequencyUnit] =
+    useState<TaskFrequencyUnit>('month');
   const [timePerOccurrenceMinutes, setTimePerOccurrenceMinutes] =
     useState<number | ''>('');
 
@@ -509,12 +532,15 @@ export default function TaskModal({
                   className="select"
                   value={frequencyUnit}
                   onChange={(e) =>
-                    setFrequencyUnit(e.target.value as 'month' | 'year')
+                    setFrequencyUnit(e.target.value as TaskFrequencyUnit)
                   }
                   disabled={disabled}
                 >
-                  <option value="month">ต่อเดือน</option>
-                  <option value="year">ต่อปี</option>
+                  {FREQUENCY_UNIT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -547,7 +573,9 @@ export default function TaskModal({
                   }}
                 >
                   {estimatedHours
-                    ? `${estimatedHours} ชั่วโมง/${frequencyUnit === 'year' ? 'ปี' : 'เดือน'}`
+                    ? `${estimatedHours} ชั่วโมง/${getFrequencyUnitShortLabel(
+                        frequencyUnit,
+                      )}`
                     : '-'}
                 </div>
               </div>
