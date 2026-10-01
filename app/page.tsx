@@ -34,6 +34,43 @@ function roleCanSeeAll(role: Role | undefined | null) {
   return role === 'admin' || role === 'manager';
 }
 
+function sanitizeTaskList(taskList: Task[], context: string) {
+  const seenIds = new Set<string>();
+  const safeTasks: Task[] = [];
+
+  for (const task of taskList) {
+    const id = typeof task?.id === 'string' ? task.id.trim() : '';
+    const name = typeof task?.name === 'string' ? task.name.trim() : '';
+
+    if (!id) {
+      console.warn(`[tasks:${context}] Skipping task without id`, task);
+      continue;
+    }
+    if (!name) {
+      console.warn(`[tasks:${context}] Skipping task without name`, task);
+      continue;
+    }
+    if (seenIds.has(id)) {
+      console.warn(`[tasks:${context}] Skipping duplicate task id`, {
+        id,
+        task,
+      });
+      continue;
+    }
+
+    seenIds.add(id);
+    safeTasks.push(task);
+  }
+
+  return safeTasks;
+}
+
+function sortTasksByStartDate(taskList: Task[]) {
+  return [...taskList].sort((a, b) =>
+    (a.start_date ?? '').localeCompare(b.start_date ?? ''),
+  );
+}
+
 export default function HomePage() {
   const router = useRouter();
 
@@ -79,7 +116,7 @@ export default function HomePage() {
           hint: (error as any).hint,
         });
       } else if (data) {
-        setTasks(data as Task[]);
+        setTasks(sanitizeTaskList(data as Task[], 'loadTasks'));
       }
     } catch (err) {
       console.error('loadTasks unexpected error:', err);
@@ -233,17 +270,21 @@ export default function HomePage() {
   const canEditTasks =
     !!currentProfile && currentProfile.role !== 'manager';
   const isAdmin = currentProfile?.role === 'admin';
+  const renderSafeTasks = useMemo(
+    () => sanitizeTaskList(tasks, 'render'),
+    [tasks],
+  );
 
   // ========= filters =========
   const roleFilteredTasks = useMemo(() => {
-    if (!currentProfile || roleCanSeeAll(currentProfile.role)) return tasks;
-    if (!currentProfile.team_id) return tasks;
-    return tasks.filter(
+    if (!currentProfile || roleCanSeeAll(currentProfile.role)) return renderSafeTasks;
+    if (!currentProfile.team_id) return renderSafeTasks;
+    return renderSafeTasks.filter(
       (t) =>
         t.team_id === currentProfile.team_id ||
         (!t.team_id && t.assignee === currentProfile.display_name),
     );
-  }, [tasks, currentProfile]);
+  }, [renderSafeTasks, currentProfile]);
 
   const timeFilteredTasks = useMemo(() => {
     const now = new Date();
@@ -450,17 +491,21 @@ export default function HomePage() {
   };
 
   const upsertTaskInState = (task: Task) => {
-    setTasks((prev) => {
-      const exists = prev.some((candidate) => candidate.id === task.id);
-      const next = exists
-        ? prev.map((candidate) =>
-            candidate.id === task.id ? { ...candidate, ...task } : candidate,
-          )
-        : [...prev, task];
-
-      return next.sort((a, b) =>
-        (a.start_date ?? '').localeCompare(b.start_date ?? ''),
+    if (!task?.id) {
+      console.warn('[tasks:upsertTaskInState] Refusing to upsert task without id', task);
+      return;
+    }
+    if (!task?.name) {
+      console.warn(
+        '[tasks:upsertTaskInState] Refusing to upsert task without name',
+        task,
       );
+      return;
+    }
+
+    setTasks((prev) => {
+      const next = [...prev.filter((candidate) => candidate.id !== task.id), task];
+      return sortTasksByStartDate(sanitizeTaskList(next, 'upsertTaskInState'));
     });
   };
 
@@ -722,7 +767,7 @@ export default function HomePage() {
         duplicateAsUserAdded && isOriginalAsTask(task)
           ? task
           : duplicateAsUserAdded
-            ? tasks.find((candidate) => candidate.id === task.parent_id)
+            ? renderSafeTasks.find((candidate) => candidate.id === task.parent_id)
             : null;
 
       if (duplicateAsUserAdded) {
@@ -774,7 +819,11 @@ export default function HomePage() {
         include_in_ai_summary: true,
       };
 
-      const { error } = await supabase.from('tasks').insert(insertPayload);
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert(insertPayload)
+        .select('*')
+        .single();
 
       if (error) {
         console.error('Supabase DUPLICATE error:', {
@@ -788,10 +837,14 @@ export default function HomePage() {
         );
         return;
       }
+      if (!data?.id) {
+        console.error('Supabase DUPLICATE returned row without id:', data);
+        alert('Cannot duplicate task: inserted task did not return a valid id.');
+        return;
+      }
 
       setIsModalOpen(false); // ถ้าอยากให้ modal ยังเปิดอยู่ก็ลบบรรทัดนี้ได้
-      await loadTasks();
-      upsertTaskInState(insertPayload as Task);
+      upsertTaskInState(data as Task);
     } catch (err) {
       console.error('handleDuplicateTask unexpected error:', err);
       alert('Unexpected error when duplicating task.');
