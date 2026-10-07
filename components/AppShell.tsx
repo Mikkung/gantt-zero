@@ -297,6 +297,20 @@ export function AppShell({
           </div>
         </div>
 
+        {(currentProfile?.role === 'admin' || currentProfile?.role === 'manager') && (
+          <div>
+            <div className="app-sidebar-section-title">MANAGEMENT</div>
+            <nav className="app-sidebar-nav">
+              <Link
+                href={`/${currentProfile.role}/monthly-reviews`}
+                style={{ display: 'flex', padding: '8px 10px', fontSize: 13, color: '#475569', textDecoration: 'none' }}
+              >
+                Monthly Progress Review
+              </Link>
+            </nav>
+          </div>
+        )}
+
         {/* team / assignee */}
         <div>
           <div className="app-sidebar-section-title">Team</div>

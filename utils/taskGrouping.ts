@@ -91,10 +91,28 @@ export function groupTasksByAssigneeAndWorkType(tasks: Task[]) {
 }
 
 export function getHierarchicalTaskRows(tasks: Task[]) {
-  const taskIds = new Set(tasks.map((task) => task.id));
-  const childrenByParent = new Map<string, Task[]>();
+  const taskIds = new Set<string>();
+  const safeTasks: Task[] = [];
 
   for (const task of tasks) {
+    if (!task.id || !task.name) {
+      console.warn('[taskGrouping] Skipping invalid task row', task);
+      continue;
+    }
+    if (taskIds.has(task.id)) {
+      console.warn('[taskGrouping] Skipping duplicate task id', {
+        id: task.id,
+        task,
+      });
+      continue;
+    }
+    taskIds.add(task.id);
+    safeTasks.push(task);
+  }
+
+  const childrenByParent = new Map<string, Task[]>();
+
+  for (const task of safeTasks) {
     const parentKey =
       task.parent_id && taskIds.has(task.parent_id) ? task.parent_id : 'root';
     childrenByParent.set(parentKey, [
@@ -105,7 +123,17 @@ export function getHierarchicalTaskRows(tasks: Task[]) {
 
   const rows: Array<{ task: Task; depth: number }> = [];
 
-  const walk = (parentId: string, depth: number) => {
+  const walk = (parentId: string, depth: number, visited: Set<string>) => {
+    if (visited.has(parentId)) {
+      console.warn('[taskGrouping] Skipping recursive parent chain', {
+        parentId,
+      });
+      return;
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(parentId);
+
     const list = [...(childrenByParent.get(parentId) ?? [])].sort((a, b) => {
       const aStart = a.start_date ?? '';
       const bStart = b.start_date ?? '';
@@ -114,11 +142,18 @@ export function getHierarchicalTaskRows(tasks: Task[]) {
     });
 
     for (const task of list) {
+      if (nextVisited.has(task.id)) {
+        console.warn('[taskGrouping] Skipping recursive task row', {
+          id: task.id,
+          parentId,
+        });
+        continue;
+      }
       rows.push({ task, depth });
-      walk(task.id, depth + 1);
+      walk(task.id, depth + 1, nextVisited);
     }
   };
 
-  walk('root', 0);
+  walk('root', 0, new Set());
   return rows;
 }
