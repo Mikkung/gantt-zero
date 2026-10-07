@@ -1,0 +1,47 @@
+.page { max-width: 1400px; margin: 0 auto; padding: 28px 24px 48px; }
+.header, .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.header { border-bottom: 1px solid #d7dce1; padding-bottom: 20px; margin-bottom: 24px; }
+.page h1 { font-size: 25px; font-weight: 650; margin: 6px 0 0; overflow-wrap: anywhere; }
+.page h2 { font-size: 17px; margin: 0; font-weight: 600; }
+.brand { font-size: 12px; color: #8b2332; font-weight: 600; }
+.toolbar { margin: 20px 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.createForm, .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; margin: 20px 0; }
+.createForm { padding: 20px 0; border-block: 1px solid #d7dce1; }
+.page label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 500; min-width: 0; }
+.filters label, .createForm label { flex: 1 1 200px; }
+.page input, .page select, .page textarea { font: inherit; font-weight: 400; color: #20252a; background: white; border: 1px solid #c7cdd4; border-radius: 6px; padding: 10px 12px; max-width: 100%; min-width: 0; }
+.page textarea { resize: vertical; width: 100%; }
+.page input:focus-visible, .page select:focus-visible, .page textarea:focus-visible { outline: 2px solid #8b2332; outline-offset: 2px; }
+.page button:disabled, .page textarea:disabled { opacity: .6; cursor: not-allowed; }
+.summary { display: flex; flex-wrap: wrap; gap: 40px; padding: 16px 0; border-block: 1px solid #d7dce1; }
+.summary dt { font-size: 13px; color: #5e6671; }
+.summary dd { font-size: 24px; font-weight: 600; margin: 6px 0 0; }
+.tableWrap { overflow-x: auto; background: white; border-block: 1px solid #d7dce1; }
+.tableWrap table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+.tableWrap th { color: #5e6671; background: #f7f8fa; font-weight: 600; padding: 12px; white-space: nowrap; }
+.tableWrap td { padding: 12px; border-top: 1px solid #e6e9ec; vertical-align: top; overflow-wrap: anywhere; }
+.tableWrap a:not(:global(.btn)) { color: #8b2332; text-underline-offset: 3px; }
+.tableWrap tbody tr:hover { background: #fafbfc; }
+.taskTable { min-width: 950px; table-layout: fixed; }
+.taskTable th:first-child { width: 23%; }
+.taskTable th:nth-child(4) { width: 24%; }
+.taskTable th:nth-child(5) { width: 6%; }
+.reviewed, .pending { display: inline-block; white-space: nowrap; font-size: 12px; font-weight: 500; border-radius: 4px; padding: 4px 8px; }
+.reviewed { color: #16624b; background: #e4f4ed; }
+.pending { color: #795913; background: #fff4d8; }
+.notice { color: #345852; background: #eaf3f0; padding: 12px 14px; font-size: 14px; overflow-wrap: anywhere; }
+.error { color: #9b2433; background: #fff0f1; padding: 12px 14px; font-size: 14px; overflow-wrap: anywhere; }
+.muted { color: #626b76; font-size: 12px; }
+.preWrap { white-space: pre-wrap; }
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.progress progress { width: 90px; max-width: 100%; height: 7px; accent-color: #257361; }
+.commentSection { margin-top: 32px; padding-top: 24px; border-top: 1px solid #d7dce1; }
+.commentSection label { margin: 16px 0; }
+@media (max-width: 600px) {
+  .page { padding: 18px 14px 32px; }
+  .page h1 { font-size: 22px; }
+  .summary { gap: 24px; }
+  .tableWrap table:not(.taskTable) { min-width: 600px; }
+  .header :global(.btn), .actions :global(.btn) { white-space: normal; text-align: center; }
+}
