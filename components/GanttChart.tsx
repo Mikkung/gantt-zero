@@ -14,6 +14,7 @@ import {
   getPositiveWeight,
 } from '../utils/taskProgress';
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
+import { getTrackingWeightDisplay } from '../utils/userAddedProgress';
 
 interface GanttProps {
   tasks: Task[];
@@ -685,6 +686,7 @@ export default function GanttChart({
         const sourceLabel = getTaskSourceLabel(original);
         const sourceColor = isOriginalAsTask(original) ? '#475569' : '#047857';
         const sourceBg = isOriginalAsTask(original) ? '#f8fafc' : '#ecfdf5';
+        const taskWeight = getTrackingWeightDisplay(original);
 
         return `
           <div style="
@@ -709,8 +711,8 @@ export default function GanttChart({
               <span style="font-weight:600;color:#0f172a">${task.progress || 0}%</span>
             </div>
             <div style="display:flex;justify-content:space-between;color:#64748b;margin-bottom:2px">
-              <span>Weight</span>
-              <span style="font-weight:600;color:#0f172a">${original.weight || 0}</span>
+              <span>${taskWeight.label}</span>
+              <span style="font-weight:600;color:#0f172a">${formatNumber(taskWeight.value)}${taskWeight.isProgressOnly ? '%' : ''}</span>
             </div>
             ${
               original.assignee

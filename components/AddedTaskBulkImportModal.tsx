@@ -5,6 +5,8 @@ import * as XLSX from 'xlsx';
 import type { Profile, Task, WorkType } from '../types';
 import { supabase } from '../utils/supabase';
 import { isOriginalAsTask } from '../utils/taskSource';
+import { calculateAutoUserAddedWeights, parseUserAddedWeight, USER_ADDED_WEIGHT_HEADER } from '../utils/userAddedProgress';
+import { rebalanceUserAddedWeights } from '../utils/userAddedWeightPersistence';
 
 type AddedTaskBulkImportMode = 'download' | 'import';
 
@@ -39,6 +41,8 @@ type PreviewRow = {
   status: Task['status'];
   priority: Task['priority'];
   progress: number;
+  userAddedWeight: number;
+  userAddedWeightIsManual: boolean;
   progressSummary: string | null;
   clientRef: string;
   workType: WorkType;
@@ -65,6 +69,7 @@ const TASK_TEMPLATE_HEADERS = [
   'ความคืบหน้า %',
   'สรุปความคืบหน้า',
   'client_ref',
+  USER_ADDED_WEIGHT_HEADER,
 ];
 
 const USER_INPUT_HEADERS = [
@@ -279,12 +284,14 @@ function isBlankImportRow(row: Record<string, unknown>) {
   const priority = normalizeCell(row.Priority);
   const workType = normalizeCell(row['Work Type']);
   const progress = normalizeCell(row['ความคืบหน้า %']);
+  const addedWeight = normalizeCell(row[USER_ADDED_WEIGHT_HEADER] ?? row.user_added_weight);
 
   return (
     (!status || status === 'To Do') &&
     (!priority || priority === 'Medium') &&
     (!workType || workType === 'routine') &&
-    (!progress || progress === '0' || progress === '0%')
+    (!progress || progress === '0' || progress === '0%') &&
+    (!addedWeight || addedWeight === '0')
   );
 }
 
@@ -304,6 +311,7 @@ function makeRowsForTemplate(parentMapRows: ParentMapRow[]) {
       'ความคืบหน้า %': '0',
       สรุปความคืบหน้า: '',
       client_ref: '',
+      [USER_ADDED_WEIGHT_HEADER]: '',
     });
   });
 
@@ -320,6 +328,7 @@ function makeRowsForTemplate(parentMapRows: ParentMapRow[]) {
       'ความคืบหน้า %': '0',
       สรุปความคืบหน้า: '',
       client_ref: '',
+      [USER_ADDED_WEIGHT_HEADER]: '',
     });
   }
 
@@ -572,6 +581,7 @@ export default function AddedTaskBulkImportModal({
         { wch: 14 },
         { wch: 36 },
         { wch: 18 },
+        { wch: 22 },
       ];
       taskSheet['!freeze'] = { xSplit: 0, ySplit: 1 };
 
@@ -581,6 +591,7 @@ export default function AddedTaskBulkImportModal({
         ['เลือกงานหลักจาก AS, สถานะ, Priority และ Work Type จาก dropdown'],
         ['กรอกชื่องานย่อยใน column "งานย่อยที่ต้องการเพิ่ม"'],
         ['วันที่ให้ใช้รูปแบบ YYYY-MM-DD เช่น 2026-09-09'],
+        ['เว้นน้ำหนักย่อย (%) ว่างให้ระบบแบ่งอัตโนมัติ หรือกรอก 0-100 เพื่อกำหนดเอง ไม่กระทบคะแนนประเมิน'],
         ['งานที่เพิ่มจะไม่กระทบคะแนนประเมินอย่างเป็นทางการ'],
         ['งานที่เพิ่มอาจถูกใช้เป็นหลักฐานประกอบ AI summary'],
         ['กรุณาอย่าแก้ไข sheet ที่ขึ้นต้นด้วย _SYSTEM หรือ _LOOKUP'],
@@ -702,6 +713,16 @@ export default function AddedTaskBulkImportModal({
             formula2: '100',
             errorTitle: 'Invalid progress',
             error: 'Progress must be a number from 0 to 100.',
+          },
+          {
+            sqref: `L2:L${lastRow}`,
+            type: 'decimal',
+            operator: 'between',
+            allowBlank: true,
+            formula1: '0',
+            formula2: '100',
+            errorTitle: 'Invalid progress-only weight',
+            error: 'user_added_weight must be a number from 0 to 100.',
           },
         ],
         fileName,
@@ -868,6 +889,11 @@ export default function AddedTaskBulkImportModal({
             messages.push(progress.error);
             result = 'error';
           }
+          const addedWeight = parseUserAddedWeight(row[USER_ADDED_WEIGHT_HEADER] ?? row.user_added_weight);
+          if (addedWeight.error) {
+            messages.push(addedWeight.error);
+            result = 'error';
+          }
 
           const status = parseStatus(row['สถานะ']);
           if (status.error) {
@@ -922,6 +948,8 @@ export default function AddedTaskBulkImportModal({
             status: status.value,
             priority: priority.value,
             progress: progress.value,
+            userAddedWeight: addedWeight.value,
+            userAddedWeightIsManual: normalizeCell(row[USER_ADDED_WEIGHT_HEADER] ?? row.user_added_weight) !== '',
             progressSummary,
             clientRef,
             workType: workType.value,
@@ -936,7 +964,17 @@ export default function AddedTaskBulkImportModal({
         return;
       }
 
-      setPreviewRows(parsedRows);
+      const incoming = parsedRows.map(row => ({
+        id: `__import_${row.rowNumber}`, created_at: `9999-${String(row.rowNumber).padStart(8, '0')}`,
+        name: row.childName, parent_id: row.parentTaskId, task_source: 'user_added',
+        user_added_weight: row.userAddedWeight, user_added_weight_is_manual: row.userAddedWeightIsManual,
+      } as Task));
+      const weights = new Map<string, number>();
+      for (const parentId of new Set(parsedRows.map(row => row.parentTaskId))) {
+        const siblings = [...tasks, ...incoming].filter(task => task.task_source === 'user_added' && task.parent_id === parentId);
+        for (const [id, weight] of Object.entries(calculateAutoUserAddedWeights(siblings).weights)) weights.set(id, weight);
+      }
+      setPreviewRows(parsedRows.map(row => ({ ...row, userAddedWeight: weights.get(`__import_${row.rowNumber}`) ?? row.userAddedWeight })));
     } catch (error) {
       console.error('Added task import preview error:', error);
       setPreviewError('Cannot read XLSX file. Please use the downloaded template.');
@@ -974,23 +1012,34 @@ export default function AddedTaskBulkImportModal({
         parent_id: row.parentTaskId,
         work_type: row.workType,
         weight: 0,
+        user_added_weight: row.userAddedWeightIsManual ? row.userAddedWeight : 0,
+        user_added_weight_is_manual: row.userAddedWeightIsManual,
         calculated_progress: null,
         task_source: 'user_added',
         counts_toward_assessment: false,
         include_in_ai_summary: true,
       }));
 
-      const { error } = await supabase.from('tasks').insert(insertRows);
+      const { error } = await supabase.rpc('create_user_added_tasks', { task_rows: insertRows });
       if (error) {
         alert(`Cannot import added tasks: ${error.message}`);
         return;
       }
 
-      await onImported();
-      alert(`เพิ่มงานย่อยสำเร็จ ${insertRows.length} รายการ`);
+      // The insert has committed. Clear the preview before any follow-up that can fail,
+      // so retrying a balance/refresh never inserts the same tasks twice.
       setPreviewRows([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      const balanceErrors: string[] = [];
+      for (const parentId of [...new Set(insertRows.map(row => row.parent_id!))].sort()) {
+        try { await rebalanceUserAddedWeights(parentId); }
+        catch (error) { balanceErrors.push(error instanceof Error ? error.message : String(error)); }
+      }
       onClose();
+      try { await onImported(); }
+      catch (error) { balanceErrors.push(`Refresh failed: ${error instanceof Error ? error.message : String(error)}`); }
+      alert(`เพิ่มงานย่อยสำเร็จ ${insertRows.length} รายการ${balanceErrors.length
+        ? ` แต่ปรับน้ำหนักย่อย/โหลดข้อมูลไม่สำเร็จ กรุณา Refresh แล้วลองปุ่ม Auto balance อีกครั้ง: ${balanceErrors.join('; ')}` : ''}`);
     } catch (error) {
       console.error('Added task import confirm error:', error);
       alert('Unexpected error while importing added tasks.');
@@ -1135,6 +1184,7 @@ export default function AddedTaskBulkImportModal({
                           <th>Priority</th>
                           <th>Work Type</th>
                           <th>Progress</th>
+                          <th>น้ำหนักย่อย (%)</th>
                           <th>Result</th>
                           <th>Message</th>
                         </tr>
@@ -1149,6 +1199,7 @@ export default function AddedTaskBulkImportModal({
                             <td>{row.priority}</td>
                             <td>{row.workType}</td>
                             <td>{row.progress}%</td>
+                            <td>{row.userAddedWeight}% <small>{row.userAddedWeightIsManual ? '(manual)' : '(auto)'}</small></td>
                             <td>{row.result}</td>
                             <td>{row.messages.join(' | ') || '-'}</td>
                           </tr>

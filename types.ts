@@ -54,6 +54,9 @@ export interface Task {
   work_type?: WorkType | null;
 
   weight?: number | null;
+  user_added_weight?: number | null;
+  user_added_weight_is_manual?: boolean;
+  created_at?: string | null;
   calculated_progress?: number | null;
   progress_summary?: string | null;
 

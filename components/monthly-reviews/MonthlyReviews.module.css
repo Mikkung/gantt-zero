@@ -23,10 +23,11 @@
 .tableWrap td { padding: 12px; border-top: 1px solid #e6e9ec; vertical-align: top; overflow-wrap: anywhere; }
 .tableWrap a:not(:global(.btn)) { color: #8b2332; text-underline-offset: 3px; }
 .tableWrap tbody tr:hover { background: #fafbfc; }
-.taskTable { min-width: 950px; table-layout: fixed; }
-.taskTable th:first-child { width: 23%; }
-.taskTable th:nth-child(4) { width: 24%; }
-.taskTable th:nth-child(5) { width: 6%; }
+.taskTable { min-width: 1150px; table-layout: fixed; }
+.taskTable th:first-child { width: 21%; }
+.taskTable th:nth-child(4) { width: 22%; }
+.taskTable th:nth-child(5) { width: 9%; }
+.taskTable th:nth-child(6) { width: 12%; }
 .reviewed, .pending { display: inline-block; white-space: nowrap; font-size: 12px; font-weight: 500; border-radius: 4px; padding: 4px 8px; }
 .reviewed { color: #16624b; background: #e4f4ed; }
 .pending { color: #795913; background: #fff4d8; }
@@ -34,6 +35,7 @@
 .error { color: #9b2433; background: #fff0f1; padding: 12px 14px; font-size: 14px; overflow-wrap: anywhere; }
 .muted { color: #626b76; font-size: 12px; }
 .preWrap { white-space: pre-wrap; }
+.weightWarning { margin-top: 6px; color: #795913; font-size: 12px; }
 .progress { display: flex; flex-direction: column; gap: 6px; }
 .progress progress { width: 90px; max-width: 100%; height: 7px; accent-color: #257361; }
 .commentSection { margin-top: 32px; padding-top: 24px; border-top: 1px solid #d7dce1; }

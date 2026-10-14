@@ -3,8 +3,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Task, Profile, TaskFrequencyUnit, TaskSource } from '../types';
-import { generateDeterministicProgressSummary } from '../utils/taskProgress';
+import { formatNumber, generateDeterministicProgressSummary } from '../utils/taskProgress';
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
+import {
+  getUserAddedProgressRollup, getUserAddedWeightWarning, parseUserAddedWeight, previewUserAddedWeight,
+  USER_ADDED_WEIGHT_HELP, USER_ADDED_WEIGHT_LABEL,
+} from '../utils/userAddedProgress';
 
 // ถ้าคุณย้าย WorkType ไปไว้ใน types.ts แล้ว export ก็ลบ type นี้ออกได้
 export type WorkType =
@@ -61,6 +65,7 @@ interface TaskModalProps {
   // 👇 ใหม่: ฟังก์ชันสำหรับ duplicate task
   onDuplicate?: (task: Task) => void;
   onAddSubtask?: (task: Task) => void;
+  onAutoBalance?: (parent: Task, resetManual?: boolean) => Promise<Task[]>;
 }
 
 export default function TaskModal({
@@ -77,12 +82,14 @@ export default function TaskModal({
   onDelete,
   onDuplicate,
   onAddSubtask,
+  onAutoBalance,
 }: TaskModalProps) {
   const isEdit = !!task;
   const disabled = !canEdit;
   const isUserRole = currentUser?.role === 'user';
   const isAdminRole = currentUser?.role === 'admin';
   const isCreateChildMode = !isEdit && !!fixedParentTask;
+  const isExistingUserAddedTask = task?.task_source === 'user_added';
 
   // ----- local form state -----
   const [name, setName] = useState('');
@@ -93,6 +100,9 @@ export default function TaskModal({
   const [priority, setPriority] = useState<Task['priority']>('Medium');
   const [progress, setProgress] = useState<number>(0);
   const [weight, setWeight] = useState<number | ''>(0);
+  const [userAddedWeight, setUserAddedWeight] = useState<number | ''>(task?.user_added_weight ?? 0);
+  const [isManualWeight, setIsManualWeight] = useState(task?.user_added_weight_is_manual ?? false);
+  const [balancing, setBalancing] = useState(false);
   const [progressSummary, setProgressSummary] = useState('');
   const [assignee, setAssignee] = useState<string | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
@@ -104,9 +114,18 @@ export default function TaskModal({
   const [recurringUnit, setRecurringUnit] =
     useState<Task['recurring_unit']>('month');
   const [dependencies, setDependencies] = useState<string | null>(null);
-  const [taskSource, setTaskSource] = useState<TaskSource>('as_original');
+  const [taskSource, setTaskSource] = useState<TaskSource>(
+    task ? task.task_source ?? 'as_original' : isCreateChildMode || !isAdminRole ? 'user_added' : 'admin_added',
+  );
   const [countsTowardAssessment, setCountsTowardAssessment] = useState(true);
   const [includeInAiSummary, setIncludeInAiSummary] = useState(true);
+  const isUserAddedMode = isCreateChildMode || isExistingUserAddedTask || taskSource === 'user_added';
+  const effectiveParentId = isCreateChildMode
+    ? fixedParentTask?.id ?? null
+    : isExistingUserAddedTask ? task.parent_id ?? null : parentId;
+  const autoWeightPreview = previewUserAddedWeight(effectiveParentId, allTasks,
+    task ? { ...task, parent_id: effectiveParentId, task_source: 'user_added', user_added_weight_is_manual: false } : null);
+  const displayedUserAddedWeight = isManualWeight ? userAddedWeight : autoWeightPreview.weight;
 
   // ประเภทงาน
   const [workType, setWorkType] = useState<WorkType | ''>('');
@@ -151,6 +170,8 @@ export default function TaskModal({
       setPriority(task.priority);
       setProgress(task.progress ?? 0);
       setWeight(task.weight ?? 0);
+      setUserAddedWeight(task.user_added_weight ?? 0);
+      setIsManualWeight(task.user_added_weight_is_manual ?? false);
       setProgressSummary(task.progress_summary ?? '');
       setAssignee(task.assignee);
       setParentId(task.parent_id ?? null);
@@ -182,6 +203,8 @@ export default function TaskModal({
       setPriority('Medium');
       setProgress(0);
       setWeight(0);
+      setUserAddedWeight(0);
+      setIsManualWeight(false);
       setProgressSummary('');
       setAssignee(
         isCreateChildMode
@@ -292,8 +315,17 @@ export default function TaskModal({
       alert('Please choose an assignee.');
       return;
     }
-    if (weight !== '' && Number(weight) < 0) {
+    if (!isUserAddedMode && weight !== '' && Number(weight) < 0) {
       alert('Weight cannot be negative.');
+      return;
+    }
+    const parsedAddedWeight = parseUserAddedWeight(displayedUserAddedWeight);
+    if (isUserAddedMode && parsedAddedWeight.error) {
+      alert(parsedAddedWeight.error);
+      return;
+    }
+    if (isUserAddedMode && !effectiveParentId) {
+      alert('Please select an original AS parent task.');
       return;
     }
 
@@ -306,14 +338,22 @@ export default function TaskModal({
       status,
       priority,
       progress,
-      weight: isCreateChildMode ? 0 : weight === '' ? 0 : Number(weight),
+      weight: isUserAddedMode
+        ? 0
+        : !isAdminRole && task
+          ? task.weight ?? 0
+          : weight === '' ? 0 : Number(weight),
+      ...(isUserAddedMode ? {
+        user_added_weight: parsedAddedWeight.value,
+        user_added_weight_is_manual: isManualWeight,
+      } : {}),
       progress_summary: progressSummary.trim() || null,
       assignee: isCreateChildMode
         ? currentUser?.role === 'user'
           ? currentUser.display_name
           : fixedParentTask?.assignee ?? assignee
         : assignee,
-      parent_id: isCreateChildMode ? fixedParentTask?.id ?? null : parentId,
+      parent_id: effectiveParentId,
       is_recurring: isRecurring,
       recurring_type: isRecurring ? recurringType : 'none',
       recurring_interval: isRecurring ? recurringInterval : null,
@@ -328,17 +368,17 @@ export default function TaskModal({
         timePerOccurrenceMinutes === ''
           ? null
           : Number(timePerOccurrenceMinutes),
-      task_source: isCreateChildMode
+      task_source: isUserAddedMode
         ? 'user_added'
         : isAdminRole
           ? taskSource
           : undefined,
-      counts_toward_assessment: isCreateChildMode
+      counts_toward_assessment: isUserAddedMode
         ? false
         : isAdminRole
           ? countsTowardAssessment
           : undefined,
-      include_in_ai_summary: isCreateChildMode
+      include_in_ai_summary: isUserAddedMode
         ? true
         : isAdminRole
           ? includeInAiSummary
@@ -373,6 +413,33 @@ export default function TaskModal({
     isOriginalAsTask(task) &&
     (isAdminRole ||
       (isUserRole && task.assignee === currentUser?.display_name));
+  const progressParent = isUserAddedMode
+    ? fixedParentTask ?? allTasks.find(candidate => candidate.id === effectiveParentId)
+    : task;
+  const addedWeightWarning = progressParent
+    ? getUserAddedWeightWarning(getUserAddedProgressRollup(progressParent, allTasks))
+    : null;
+  const manualTotal = autoWeightPreview.manualTotal + (isManualWeight ? parseUserAddedWeight(userAddedWeight).value : 0);
+  const canAutoBalance = !!progressParent && !!onAutoBalance && !disabled &&
+    isOriginalAsTask(progressParent) && (isAdminRole || (isUserRole && progressParent.assignee === currentUser?.display_name)) &&
+    allTasks.some(candidate => candidate.parent_id === progressParent.id && candidate.task_source === 'user_added');
+  const hasManualSiblings = !!progressParent && allTasks.some(candidate =>
+    candidate.parent_id === progressParent.id && candidate.task_source === 'user_added' && candidate.user_added_weight_is_manual === true);
+  const handleAutoBalance = async (resetManual = false) => {
+    if (!canAutoBalance || !progressParent || !onAutoBalance || balancing) return;
+    if (resetManual && !confirm('ปรับน้ำหนักย่อยทุกงานใต้ AS task นี้เป็นอัตโนมัติ และล้างน้ำหนักที่กำหนดเองทั้งหมดหรือไม่?')) return;
+    setBalancing(true);
+    try {
+      const siblings = await onAutoBalance(progressParent, resetManual);
+      const saved = task ? siblings.find(row => row.id === task.id) : undefined;
+      if (saved) {
+        setIsManualWeight(saved.user_added_weight_is_manual === true);
+        setUserAddedWeight(saved.user_added_weight ?? 0);
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : (error as { message?: string })?.message ?? 'Cannot auto balance subtask weights.');
+    } finally { setBalancing(false); }
+  };
 
   const RequiredMark = () => (
     <span style={{ color: '#ef4444', marginLeft: 2 }}>*</span>
@@ -639,9 +706,39 @@ export default function TaskModal({
                 />
               </div>
 
-              {!isCreateChildMode && (
+              {isUserAddedMode ? (
                 <div style={{ marginTop: 12 }}>
-                  <div className="field-label">Weight</div>
+                  <label className="field-label" htmlFor="user-added-weight">{USER_ADDED_WEIGHT_LABEL}</label>
+                  <input
+                    id="user-added-weight"
+                    type="number"
+                    className="input"
+                    value={displayedUserAddedWeight}
+                    onChange={e => {
+                      setUserAddedWeight(e.target.value === '' ? '' : Number(e.target.value));
+                      setIsManualWeight(true);
+                    }}
+                    min={0}
+                    max={100}
+                    step="any"
+                    disabled={disabled || balancing}
+                    aria-describedby="user-added-weight-help"
+                  />
+                  <div className="field-label-small" id="user-added-weight-help">{USER_ADDED_WEIGHT_HELP}</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 12 }}>
+                    <input type="checkbox" checked={isManualWeight} disabled={disabled || balancing} onChange={event => {
+                      if (event.target.checked) setUserAddedWeight(displayedUserAddedWeight);
+                      setIsManualWeight(event.target.checked);
+                    }} />
+                    กำหนดน้ำหนักเอง
+                  </label>
+                  {manualTotal >= 100 && <div role="status" style={{ marginTop: 8, color: '#92400e', fontSize: 12 }}>
+                    น้ำหนักย่อยที่กำหนดเองรวม = {formatNumber(manualTotal)}% งานอัตโนมัติจะได้รับน้ำหนัก 0%
+                  </div>}
+                </div>
+              ) : (
+                <div style={{ marginTop: 12 }}>
+                  <div className="field-label">Official weight / น้ำหนักงานจาก AS</div>
                   <input
                     type="number"
                     className="input"
@@ -654,10 +751,19 @@ export default function TaskModal({
                     placeholder="0"
                     min={0}
                     step="0.1"
-                    disabled={disabled}
+                    disabled={disabled || !isAdminRole}
                   />
                 </div>
               )}
+              {canAutoBalance && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => handleAutoBalance()} disabled={balancing}>
+                  {balancing ? 'Balancing...' : 'Auto balance น้ำหนักย่อย'}
+                </button>
+                {hasManualSiblings && <button type="button" className="btn btn-ghost" onClick={() => handleAutoBalance(true)} disabled={balancing}>
+                  รีเซ็ตน้ำหนักย่อยทุกงานเป็น Auto
+                </button>}
+              </div>}
+              {addedWeightWarning && <div role="status" style={{ marginTop: 10, fontSize: 12, color: '#92400e' }}>{addedWeightWarning}</div>}
 
               {isAdminRole && !isCreateChildMode && (
                 <div style={{ marginTop: 12 }}>
@@ -667,7 +773,7 @@ export default function TaskModal({
                     className="select"
                     value={taskSource}
                     onChange={(e) => setTaskSource(e.target.value as TaskSource)}
-                    disabled={disabled}
+                    disabled={disabled || isExistingUserAddedTask}
                   >
                     <option value="as_original">AS Original</option>
                     <option value="admin_added">Admin Added</option>
@@ -685,11 +791,11 @@ export default function TaskModal({
                   >
                     <input
                       type="checkbox"
-                      checked={countsTowardAssessment}
+                      checked={isUserAddedMode ? false : countsTowardAssessment}
                       onChange={(e) =>
                         setCountsTowardAssessment(e.target.checked)
                       }
-                      disabled={disabled}
+                      disabled={disabled || isUserAddedMode}
                     />
                     Counts toward assessment
                   </label>
@@ -705,9 +811,9 @@ export default function TaskModal({
                   >
                     <input
                       type="checkbox"
-                      checked={includeInAiSummary}
+                      checked={isUserAddedMode ? true : includeInAiSummary}
                       onChange={(e) => setIncludeInAiSummary(e.target.checked)}
-                      disabled={disabled}
+                      disabled={disabled || isUserAddedMode}
                     />
                     Include in AI summary
                   </label>
@@ -742,7 +848,7 @@ export default function TaskModal({
                   Assignee
                   <RequiredMark />
                 </div>
-                {isCreateChildMode ? (
+                {isCreateChildMode || isUserRole ? (
                   <div
                     className="input"
                     style={{
@@ -775,7 +881,7 @@ export default function TaskModal({
 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Parent task</div>
-                {isCreateChildMode && fixedParentTask ? (
+                {isCreateChildMode || isExistingUserAddedTask ? (
                   <div
                     className="input"
                     style={{
@@ -785,7 +891,7 @@ export default function TaskModal({
                       background: '#f8fafc',
                     }}
                   >
-                    {fixedParentTask.name}
+                    {fixedParentTask?.name ?? allTasks.find(candidate => candidate.id === effectiveParentId)?.name ?? effectiveParentId ?? '-'}
                   </div>
                 ) : (
                   <select
@@ -892,7 +998,7 @@ export default function TaskModal({
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={!canEdit}
+              disabled={!canEdit || balancing}
             >
               {canEdit
                 ? isEdit

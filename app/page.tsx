@@ -8,12 +8,16 @@ import AddedTaskBulkImportModal from '../components/AddedTaskBulkImportModal';
 import GanttChart from '../components/GanttChart';
 import TaskModal from '../components/TaskModal';
 import { supabase } from '../utils/supabase';
+import { rebalanceUserAddedWeights } from '../utils/userAddedWeightPersistence';
 import {
-  calculateTaskProgressMetrics,
   calculateWorkloadSummary,
   formatNumber,
   formatProgress,
 } from '../utils/taskProgress';
+import {
+  calculateTrackingProgressMetrics, getUserAddedProgressRollup,
+  getTrackingWeightDisplay, getUserAddedWeightWarning, parseUserAddedWeight,
+} from '../utils/userAddedProgress';
 import {
   getHierarchicalTaskRows,
   groupTasksByAssigneeAndWorkType,
@@ -324,9 +328,13 @@ export default function HomePage() {
   }, [sourceFilteredTasks, filterTeamId, filterAssignee]);
 
   const progressMetrics = useMemo(
-    () => calculateTaskProgressMetrics(fullyFilteredTasks),
-    [fullyFilteredTasks],
+    () => calculateTrackingProgressMetrics(fullyFilteredTasks, renderSafeTasks),
+    [fullyFilteredTasks, renderSafeTasks],
   );
+  const userAddedWeightWarnings = fullyFilteredTasks.flatMap(task => {
+    const warning = getUserAddedWeightWarning(getUserAddedProgressRollup(task, renderSafeTasks));
+    return warning ? [{ id: task.id, name: task.name, warning }] : [];
+  });
 
   const tasksWithCalculatedProgress = useMemo(
     () =>
@@ -456,8 +464,10 @@ export default function HomePage() {
   };
 
   const handleTaskClick = (task: Task) => {
+    const storedTask = renderSafeTasks.find(candidate => candidate.id === task.id);
+    if (!storedTask) return;
     setFixedChildParentTask(null);
-    setSelectedTask(task);
+    setSelectedTask(storedTask);
     setIsModalOpen(true);
   };
 
@@ -508,6 +518,22 @@ export default function HomePage() {
       return sortTasksByStartDate(sanitizeTaskList(next, 'upsertTaskInState'));
     });
   };
+  const balanceParentInState = async (parentId: string, resetManual = false) => {
+    const rows = await rebalanceUserAddedWeights(parentId, resetManual);
+    const ids = new Set(rows.map(row => row.id));
+    setTasks(previous => sortTasksByStartDate(sanitizeTaskList([
+      ...previous.filter(row => !ids.has(row.id) &&
+        !(row.parent_id === parentId && row.task_source === 'user_added')), ...rows,
+    ], 'balanceParentInState')));
+    return rows;
+  };
+  const balanceAfterTaskMutation = async (parentId: string) => {
+    try { await balanceParentInState(parentId); }
+    catch (error) {
+      alert('บันทึกการเปลี่ยนแปลงงานแล้ว แต่ปรับน้ำหนักย่อยไม่สำเร็จ กรุณาลองปุ่ม Auto balance อีกครั้ง: ' +
+        (error instanceof Error ? error.message : String(error)));
+    }
+  };
 
   const handleSaveTask = async (partial: Partial<Task>) => {
     try {
@@ -518,13 +544,17 @@ export default function HomePage() {
         return;
       }
 
-      // assignee: ต้องเป็น uuid หรือ null เท่านั้น (ตอนนี้ใช้เป็น string ก็เซฟตรง ๆ ได้)
+      // Task ownership uses the profile display name stored in tasks.assignee.
       const normalizedAssignee =
         partial.assignee === '' || partial.assignee == null
           ? null
           : partial.assignee;
-      const parentTask = partial.parent_id
-        ? tasks.find((task) => task.id === partial.parent_id)
+      const isExistingUserAddedTask = selectedTask?.task_source === 'user_added';
+      const effectiveParentId = isExistingUserAddedTask
+        ? selectedTask.parent_id ?? null
+        : partial.parent_id ?? null;
+      const parentTask = effectiveParentId
+        ? tasks.find((task) => task.id === effectiveParentId)
         : null;
       const isUserRole = currentProfile?.role === 'user';
       const isCreating = !selectedTask;
@@ -578,7 +608,9 @@ export default function HomePage() {
         (partial as any).team_id ??
         defaultTeamId;
       const effectiveAssignee =
-        isCreatingFixedChildTask
+        isExistingUserAddedTask
+          ? selectedTask.assignee
+          : isCreatingFixedChildTask
           ? currentProfile?.role === 'user'
             ? currentProfile.display_name
             : parentTask?.assignee ??
@@ -590,7 +622,11 @@ export default function HomePage() {
               normalizedAssignee
             : normalizedAssignee;
       const normalizedTaskSource = selectedTask
-        ? selectedTask.task_source ?? 'as_original'
+        ? isExistingUserAddedTask
+          ? 'user_added'
+          : isAdmin
+          ? partial.task_source ?? selectedTask.task_source ?? 'as_original'
+          : selectedTask.task_source ?? 'as_original'
         : isCreatingFixedChildTask
           ? 'user_added'
           : isAdmin
@@ -608,6 +644,22 @@ export default function HomePage() {
         : isCreatingFixedChildTask
           ? true
           : partial.include_in_ai_summary ?? true;
+      const isUserAddedTask = normalizedTaskSource === 'user_added';
+      const parsedAddedWeight = parseUserAddedWeight(partial.user_added_weight ?? selectedTask?.user_added_weight);
+      const isManualAddedWeight = partial.user_added_weight_is_manual ??
+        (partial.user_added_weight !== undefined ? true : selectedTask?.user_added_weight_is_manual ?? false);
+      if (isUserAddedTask && parsedAddedWeight.error) {
+        alert(parsedAddedWeight.error);
+        return;
+      }
+      if (isUserAddedTask && (!parentTask || !isOriginalAsTask(parentTask))) {
+        alert('User-added tasks must have an original AS parent task.');
+        return;
+      }
+      if (isUserAddedTask && isUserRole && parentTask?.assignee !== currentProfile?.display_name) {
+        alert('You can add child tasks only under your own AS tasks.');
+        return;
+      }
       let savedTaskForState: Task | null = null;
 
       if (selectedTask) {
@@ -616,18 +668,30 @@ export default function HomePage() {
         const updatePayload = {
           ...rest,
           assignee: effectiveAssignee,
-          team_id: normalizedTeamId,
+          team_id: isAdmin ? normalizedTeamId : selectedTask.team_id ?? null,
+          ...(isUserAddedTask ? {
+            weight: 0,
+            user_added_weight: parsedAddedWeight.value,
+            user_added_weight_is_manual: isManualAddedWeight,
+            task_source: 'user_added',
+            counts_toward_assessment: false,
+            include_in_ai_summary: true,
+            parent_id: effectiveParentId,
+          } : {}),
         };
-        if (!isAdmin) {
+        if (!isAdmin && !isUserAddedTask) {
+          delete updatePayload.weight;
+          delete updatePayload.user_added_weight;
+        }
+        if (!isAdmin && !isUserAddedTask) {
           delete (updatePayload as any).task_source;
           delete (updatePayload as any).counts_toward_assessment;
           delete (updatePayload as any).include_in_ai_summary;
         }
 
-        const { error } = await supabase
-          .from('tasks')
-          .update(updatePayload)
-          .eq('id', selectedTask.id);
+        const { data, error } = isUserAddedTask
+          ? await supabase.rpc('update_user_added_task', { target_task_id: selectedTask.id, task_changes: updatePayload }).single()
+          : await supabase.from('tasks').update(updatePayload).eq('id', selectedTask.id).select('*').single();
 
         if (error) {
           console.error('Supabase UPDATE error:', {
@@ -641,11 +705,7 @@ export default function HomePage() {
           );
           return;
         }
-        savedTaskForState = {
-          ...selectedTask,
-          ...updatePayload,
-          id: selectedTask.id,
-        } as Task;
+        savedTaskForState = data as Task;
       } else {
         // ========= INSERT =========
         const taskId =
@@ -662,9 +722,13 @@ export default function HomePage() {
           priority: partial.priority ?? 'Medium',
           progress: partial.progress ?? 0,
           weight:
-            normalizedCountsTowardAssessment === false
+            isUserAddedTask || normalizedCountsTowardAssessment === false
               ? 0
               : partial.weight ?? 0,
+          ...(isUserAddedTask ? {
+            user_added_weight: partial.user_added_weight_is_manual === true ? parsedAddedWeight.value : 0,
+            user_added_weight_is_manual: partial.user_added_weight_is_manual ?? false,
+          } : {}),
           calculated_progress: null,
           progress_summary: partial.progress_summary ?? null,
 
@@ -686,15 +750,17 @@ export default function HomePage() {
           team_id: normalizedTeamId,
           parent_id: partial.parent_id ?? null,
           task_source: normalizedTaskSource,
-          counts_toward_assessment: normalizedCountsTowardAssessment,
-          include_in_ai_summary: normalizedIncludeInAiSummary,
+          counts_toward_assessment: isUserAddedTask ? false : normalizedCountsTowardAssessment,
+          include_in_ai_summary: isUserAddedTask ? true : normalizedIncludeInAiSummary,
         };
 
         // work_type (routine / strategic / process / self / other)
         (insertPayload as any).work_type =
           (partial as any).work_type ?? 'routine';
 
-        const { error } = await supabase.from('tasks').insert(insertPayload);
+        const { data, error } = isUserAddedTask
+          ? await supabase.rpc('create_user_added_tasks', { task_rows: [insertPayload] }).single()
+          : await supabase.from('tasks').insert(insertPayload).select('*').single();
 
         if (error) {
           console.error('Supabase INSERT error:', {
@@ -708,15 +774,16 @@ export default function HomePage() {
           );
           return;
         }
-        savedTaskForState = insertPayload as Task;
+        savedTaskForState = data as Task;
       }
 
       setIsModalOpen(false);
       setFixedChildParentTask(null);
-      await loadTasks();
       if (savedTaskForState) {
         upsertTaskInState(savedTaskForState);
       }
+      if (isUserAddedTask && effectiveParentId) await balanceAfterTaskMutation(effectiveParentId);
+      await loadTasks();
     } catch (err) {
       console.error('handleSaveTask unexpected error:', err);
       alert('Unexpected error when saving task.');
@@ -737,7 +804,9 @@ export default function HomePage() {
         return;
       }
 
-      const { error } = await supabase.from('tasks').delete().eq('id', id);
+      const { error } = targetTask?.task_source === 'user_added'
+        ? await supabase.rpc('delete_user_added_task', { target_task_id: id })
+        : await supabase.from('tasks').delete().eq('id', id);
       if (error) {
         console.error('Supabase DELETE error:', {
           message: error.message,
@@ -751,6 +820,7 @@ export default function HomePage() {
         return;
       }
       setIsModalOpen(false);
+      if (targetTask?.task_source === 'user_added' && targetTask.parent_id) await balanceAfterTaskMutation(targetTask.parent_id);
       await loadTasks();
     } catch (err) {
       console.error('handleDeleteTask unexpected error:', err);
@@ -762,7 +832,7 @@ export default function HomePage() {
   const handleDuplicateTask = async (task: Task) => {
     try {
       if (!canEditTasks) return;
-      const duplicateAsUserAdded = currentProfile?.role === 'user';
+      const duplicateAsUserAdded = currentProfile?.role === 'user' || task.task_source === 'user_added';
       const originalParentTask =
         duplicateAsUserAdded && isOriginalAsTask(task)
           ? task
@@ -774,7 +844,7 @@ export default function HomePage() {
         if (
           !originalParentTask ||
           !isOriginalAsTask(originalParentTask) ||
-          originalParentTask.assignee !== currentProfile?.display_name
+          (currentProfile?.role === 'user' && originalParentTask.assignee !== currentProfile.display_name)
         ) {
           alert('You can duplicate only into your own original AS task.');
           return;
@@ -793,7 +863,9 @@ export default function HomePage() {
         progress: 0,
 
         assignee: duplicateAsUserAdded
-          ? currentProfile?.display_name ?? null
+          ? currentProfile?.role === 'user'
+            ? currentProfile.display_name
+            : originalParentTask?.assignee ?? task.assignee
           : task.assignee ?? null,
 
         is_recurring: task.is_recurring ?? false,
@@ -812,18 +884,17 @@ export default function HomePage() {
 
         work_type: (task as any).work_type ?? 'routine',
         weight: duplicateAsUserAdded ? 0 : task.weight ?? 0,
+        ...(duplicateAsUserAdded ? { user_added_weight: 0, user_added_weight_is_manual: false } : {}),
         calculated_progress: null,
         progress_summary: task.progress_summary ?? null,
-        task_source: isAdmin ? 'admin_added' : 'user_added',
-        counts_toward_assessment: isAdmin,
+        task_source: duplicateAsUserAdded ? 'user_added' : 'admin_added',
+        counts_toward_assessment: duplicateAsUserAdded ? false : isAdmin,
         include_in_ai_summary: true,
       };
 
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert(insertPayload)
-        .select('*')
-        .single();
+      const { data, error } = duplicateAsUserAdded
+        ? await supabase.rpc('create_user_added_tasks', { task_rows: [insertPayload] }).single()
+        : await supabase.from('tasks').insert(insertPayload).select('*').single();
 
       if (error) {
         console.error('Supabase DUPLICATE error:', {
@@ -845,6 +916,10 @@ export default function HomePage() {
 
       setIsModalOpen(false); // ถ้าอยากให้ modal ยังเปิดอยู่ก็ลบบรรทัดนี้ได้
       upsertTaskInState(data as Task);
+      if (duplicateAsUserAdded && originalParentTask) {
+        await balanceAfterTaskMutation(originalParentTask.id);
+        await loadTasks();
+      }
     } catch (err) {
       console.error('handleDuplicateTask unexpected error:', err);
       alert('Unexpected error when duplicating task.');
@@ -852,6 +927,12 @@ export default function HomePage() {
   };
 
   // ========= Auth handlers =========
+  const handleAutoBalance = async (parent: Task, resetManual = false) => {
+    if (!canAddSubtaskToTask(parent)) throw new Error('You can auto balance only your own AS task.');
+    const balanced = await balanceParentInState(parent.id, resetManual);
+    await loadTasks();
+    return balanced;
+  };
 
   const handleSignOut = async () => {
     try {
@@ -882,10 +963,7 @@ export default function HomePage() {
     canAddSubtask: (t: Task) => boolean;
     groupByAssignee?: boolean;
   }) {
-    const listMetrics = useMemo(
-      () => calculateTaskProgressMetrics(tasks),
-      [tasks],
-    );
+    const listMetrics = progressMetrics;
     const assigneeGroups = useMemo(
       () => groupTasksByAssigneeAndWorkType(tasks),
       [tasks],
@@ -896,6 +974,7 @@ export default function HomePage() {
       getHierarchicalTaskRows(groupTasks).map(({ task: t, depth }) => {
         const metric = listMetrics[t.id];
         const isParent = metric?.isParent ?? false;
+        const taskWeight = getTrackingWeightDisplay(t, metric?.displayWeight);
 
         return (
           <tr
@@ -938,8 +1017,9 @@ export default function HomePage() {
             </td>
             <td style={{ padding: 6, textAlign: 'center' }}>{t.status}</td>
             <td style={{ padding: 6, textAlign: 'center' }}>
-              <div>{formatNumber(metric?.displayWeight ?? 0)}</div>
-              {metric?.isComputedWeight && (
+              <div>{formatNumber(taskWeight.value)}{taskWeight.isProgressOnly ? '%' : ''}</div>
+              {taskWeight.isProgressOnly && <div style={{ fontSize: 10, color: '#64748b' }}>น้ำหนักย่อย (progress only)</div>}
+              {!taskWeight.isProgressOnly && metric?.isComputedWeight && (
                 <div style={{ fontSize: 10, color: '#64748b' }}>คำนวณ</div>
               )}
             </td>
@@ -1200,7 +1280,7 @@ export default function HomePage() {
                             marginTop: 2,
                           }}
                         >
-                          Weight {formatNumber(t.weight ?? 0)} · Progress{' '}
+                          {getTrackingWeightDisplay(t).label} {formatNumber(getTrackingWeightDisplay(t).value)}{t.task_source === 'user_added' ? '%' : ''} · Progress{' '}
                           {formatProgress(t.calculated_progress ?? t.progress)}
                         </div>
                       </div>
@@ -1529,6 +1609,12 @@ export default function HomePage() {
           </div>
         )}
 
+        {userAddedWeightWarnings.length > 0 && (
+          <div role="status" style={{ marginBottom: 14, padding: '8px 10px', border: '1px solid #fed7aa', borderRadius: 6, background: '#fffbeb', color: '#92400e', fontSize: 12 }}>
+            {userAddedWeightWarnings.map(item => <div key={item.id}>{item.name}: {item.warning}</div>)}
+          </div>
+        )}
+
         {/* Main view area */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {loading ? (
@@ -1579,6 +1665,7 @@ export default function HomePage() {
       </div>
 
       <TaskModal
+        key={selectedTask?.id ?? (fixedChildParentTask ? `child:${fixedChildParentTask.id}` : 'new-task')}
         isOpen={isModalOpen}
         task={selectedTask}
         allTasks={tasks}
@@ -1595,6 +1682,7 @@ export default function HomePage() {
         onDelete={handleDeleteTask}
         onDuplicate={handleDuplicateTask}
         onAddSubtask={handleAddSubtask}
+        onAutoBalance={handleAutoBalance}
       />
       <AddedTaskBulkImportModal
         isOpen={isAddedTaskImportOpen}
