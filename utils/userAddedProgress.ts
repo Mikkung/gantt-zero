@@ -1,5 +1,5 @@
 import type { Task } from '../types';
-import { calculateTaskProgressMetrics, formatNumber, toFiniteNumber } from './taskProgress';
+import { calculateEffectiveTaskWeight, calculateTaskProgressMetrics, formatNumber, toFiniteNumber } from './taskProgress';
 import { isOriginalAsTask } from './taskSource';
 
 export const USER_ADDED_WEIGHT_LABEL = 'น้ำหนักย่อยสำหรับคำนวณความคืบหน้า (%)';
@@ -77,6 +77,7 @@ export function getUserAddedProgressRollup(parent: Task, tasks: Task[]): UserAdd
   const rollup: UserAddedProgressRollup = { childCount: 0, totalWeight: 0, calculatedProgress: null };
   if (!parent.id || !isOriginalAsTask(parent)) return rollup;
   let weightedProgress = 0;
+  let usableWeight = 0;
   const visited = new Set<string>();
   for (const child of tasks) {
     if (!child.id || child.id === parent.id || visited.has(child.id) || child.parent_id !== parent.id || child.task_source !== 'user_added') continue;
@@ -84,9 +85,13 @@ export function getUserAddedProgressRollup(parent: Task, tasks: Task[]): UserAdd
     rollup.childCount += 1;
     const weight = parseUserAddedWeight(child.user_added_weight).value;
     rollup.totalWeight += weight;
-    weightedProgress += Math.min(100, Math.max(0, toFiniteNumber(child.progress) ?? 0)) * weight;
+    const progress = toFiniteNumber(child.progress);
+    if (progress !== null) {
+      weightedProgress += Math.min(100, Math.max(0, progress)) * weight;
+      usableWeight += weight;
+    }
   }
-  if (rollup.totalWeight > 0) rollup.calculatedProgress = weightedProgress / rollup.totalWeight;
+  if (usableWeight > 0) rollup.calculatedProgress = weightedProgress / usableWeight;
   return rollup;
 }
 
@@ -96,19 +101,106 @@ export function getUserAddedWeightWarning(rollup: UserAddedProgressRollup) {
     : null;
 }
 
-// Display-only overlay: official weight, contribution and snapshot helpers stay unchanged.
-export function calculateTrackingProgressMetrics(tasks: Task[], progressContext: Task[] = tasks) {
-  const metrics = calculateTaskProgressMetrics(tasks);
-  for (const task of tasks) {
-    const rollup = getUserAddedProgressRollup(task, progressContext);
-    if (rollup.calculatedProgress !== null) {
-      metrics[task.id] = {
-        ...metrics[task.id],
-        isParent: true,
-        calculatedProgress: rollup.calculatedProgress,
-        displayProgress: rollup.calculatedProgress,
-      };
+// A display-only forest: detach every cycle edge, not an arbitrary edge determined by row order.
+export function getTrackingTaskContext(tasks: Task[]) {
+  const byId = new Map<string, Task>();
+  for (const task of tasks) if (task?.id && task.name && !byId.has(task.id)) byId.set(task.id, task);
+  const done = new Set<string>();
+  const cyclic = new Set<string>();
+  for (const task of byId.values()) {
+    const path: string[] = [];
+    const positions = new Map<string, number>();
+    let id: string | null = task.id;
+    while (id && byId.has(id) && !done.has(id)) {
+      const position = positions.get(id);
+      if (position !== undefined) {
+        for (const member of path.slice(position)) cyclic.add(member);
+        break;
+      }
+      positions.set(id, path.length);
+      path.push(id);
+      id = byId.get(id)!.parent_id ?? null;
     }
+    for (const member of path) done.add(member);
+  }
+  return [...byId.values()].map(task => cyclic.has(task.id) || (task.parent_id && !byId.has(task.parent_id))
+    ? { ...task, parent_id: null } : task);
+}
+
+type TrackingProgress = {
+  calculatedProgress: number | null;
+  displayProgress: number | null;
+  trackingProgressSource: 'as_children' | 'user_added' | null;
+};
+
+// Only tracking values are replaced. Official weight/contribution helpers and stored rows stay unchanged.
+export function calculateTrackingProgressMetrics(tasks: Task[], progressContext: Task[] = tasks) {
+  const context = getTrackingTaskContext([...progressContext, ...tasks]);
+  const byId = new Map(context.map(task => [task.id, task]));
+  const childrenByParent = new Map<string, Task[]>();
+  for (const task of context) {
+    if (!task.parent_id) continue;
+    const children = childrenByParent.get(task.parent_id) ?? [];
+    children.push(task);
+    childrenByParent.set(task.parent_id, children);
+  }
+  // Sanitize before invoking legacy official helpers, which assume an acyclic tree.
+  const officialMetrics = calculateTaskProgressMetrics(context);
+  const memo = new Map<string, TrackingProgress>();
+  const active = new Set<string>();
+  const effectiveWeights = new Map<string, number>();
+  const resolve = (task: Task): TrackingProgress => {
+    const cached = memo.get(task.id);
+    if (cached) return cached;
+    const recorded = toFiniteNumber(task.progress);
+    const result: TrackingProgress = {
+      calculatedProgress: null,
+      displayProgress: recorded,
+      trackingProgressSource: null,
+    };
+    if (active.has(task.id)) return result;
+    active.add(task.id);
+    if (isOriginalAsTask(task)) {
+      const children = childrenByParent.get(task.id) ?? [];
+      const originals = children.filter(isOriginalAsTask);
+      if (originals.length) {
+        const usable = originals.flatMap(child => {
+          const progress = resolve(child).displayProgress;
+          if (progress === null) return [];
+          let weight = effectiveWeights.get(child.id);
+          if (weight === undefined) {
+            weight = calculateEffectiveTaskWeight(child, context);
+            effectiveWeights.set(child.id, weight);
+          }
+          return [{ progress, weight }];
+        });
+        const positive = usable.filter(child => child.weight > 0);
+        const weighted = positive.length ? positive : usable.map(child => ({ ...child, weight: 1 }));
+        const total = weighted.reduce((sum, child) => sum + child.weight, 0);
+        if (total > 0) {
+          result.calculatedProgress = weighted.reduce((sum, child) => sum + child.progress * child.weight, 0) / total;
+          result.trackingProgressSource = 'as_children';
+        }
+      } else {
+        result.calculatedProgress = getUserAddedProgressRollup(task, children).calculatedProgress;
+        if (result.calculatedProgress !== null) result.trackingProgressSource = 'user_added';
+      }
+      result.displayProgress = result.calculatedProgress ?? recorded;
+    } else {
+      result.calculatedProgress = officialMetrics[task.id].calculatedProgress;
+      result.displayProgress = officialMetrics[task.id].displayProgress;
+    }
+    active.delete(task.id);
+    memo.set(task.id, result);
+    return result;
+  };
+  const metrics: Record<string, (typeof officialMetrics)[string] & TrackingProgress> = {};
+  for (const task of tasks) {
+    const canonical = byId.get(task?.id);
+    if (!canonical || Object.hasOwn(metrics, canonical.id)) continue;
+    const tracking = resolve(canonical);
+    metrics[canonical.id] = { ...officialMetrics[canonical.id], ...tracking,
+      isParent: tracking.trackingProgressSource !== null || officialMetrics[canonical.id].isParent };
   }
   return metrics;
 }

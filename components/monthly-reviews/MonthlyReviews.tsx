@@ -8,7 +8,7 @@ import type { Profile, Team } from '../../types';
 import { supabase } from '../../utils/supabase';
 import { getHierarchicalTaskRows, getWorkTypeLabel } from '../../utils/taskGrouping';
 import { formatProgress } from '../../utils/taskProgress';
-import { calculateTrackingProgressMetrics, getTrackingWeightDisplay, getUserAddedProgressRollup, getUserAddedWeightWarning } from '../../utils/userAddedProgress';
+import { calculateTrackingProgressMetrics, getTrackingTaskContext, getTrackingWeightDisplay, getUserAddedProgressRollup, getUserAddedWeightWarning } from '../../utils/userAddedProgress';
 import {
   canAccessMonthlyReviews, canReviewEmployee, formatMonthlyReviewDate,
   getBangkokReviewMonth, loadMonthlyRows, monthlyReviewError, monthlyReviewHref,
@@ -234,6 +234,7 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
   const [employee, setEmployee] = useState<Profile | null>(null);
   const [teamName, setTeamName] = useState('-');
   const [tasks, setTasks] = useState<MonthlyReviewTask[]>([]);
+  const [taskContext, setTaskContext] = useState<MonthlyReviewTask[]>([]);
   const [review, setReview] = useState<MonthlyProgressReview | null>(null);
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(true);
@@ -245,7 +246,7 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
     if (!identity.allowed || !identity.profile) return;
     const actor = identity.profile;
     let active = true;
-    setLoading(true); setError(''); setMessage(''); setEmployee(null); setPeriod(null); setReview(null); setTasks([]); setComment('');
+    setLoading(true); setError(''); setMessage(''); setEmployee(null); setPeriod(null); setReview(null); setTasks([]); setTaskContext([]); setComment('');
     async function load() {
       try {
         const people = await loadMonthlyRows<Profile>('profiles', { display_name: employeeId, role: 'user' });
@@ -253,13 +254,15 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
         if (!person || !canReviewEmployee(actor, person)) throw new Error('คุณไม่มีสิทธิ์เข้าถึงหน้านี้');
         const [periods, currentTasks, saved, teams] = await Promise.all([
           loadMonthlyRows<MonthlyReviewPeriod>('monthly_review_periods', { id: periodId }),
-          loadMonthlyRows<MonthlyReviewTask>('tasks', { assignee: person.display_name }),
+          loadMonthlyRows<MonthlyReviewTask>('tasks'),
           loadMonthlyRows<MonthlyProgressReview>('monthly_progress_reviews', { period_id: periodId, employee_id: person.display_name }),
           person.team_id ? loadMonthlyRows<Team>('teams', { id: person.team_id }) : Promise.resolve([]),
         ]);
         if (!periods[0]) throw new Error('Monthly review period was not found.');
         if (active) {
-          setEmployee(person); setPeriod(periods[0]); setTasks(currentTasks); setReview(saved[0] ?? null);
+          const context = getTrackingTaskContext(currentTasks);
+          setEmployee(person); setPeriod(periods[0]); setTaskContext(context);
+          setTasks(context.filter(task => task.assignee === person.display_name)); setReview(saved[0] ?? null);
           setComment(saved[0]?.review_comment ?? ''); setTeamName(teams[0]?.name ?? '-');
         }
       } catch (err) { if (active) setError(monthlyReviewError(err as { message: string; code?: string })); }
@@ -270,7 +273,7 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
   }, [identity.allowed, identity.profile, periodId, employeeId]);
 
   const taskRows = useMemo(() => getHierarchicalTaskRows(tasks), [tasks]);
-  const trackingMetrics = useMemo(() => calculateTrackingProgressMetrics(tasks), [tasks]);
+  const trackingMetrics = useMemo(() => calculateTrackingProgressMetrics(tasks, taskContext), [tasks, taskContext]);
   const readOnly = period?.status !== 'open';
 
   async function save(markReviewed: boolean) {
@@ -299,12 +302,12 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
         {taskRows.length === 0 ? <Notice>No current tasks for this employee.</Notice> : <div className={styles.tableWrap}><table className={styles.taskTable}>
           <thead><tr><th>Task</th><th>Status</th><th>Progress</th><th>Progress summary</th><th>Official weight</th><th>น้ำหนักย่อย (%)<div className={styles.muted}>Progress only</div></th><th>Work type</th><th>Updated at</th></tr></thead>
           <tbody>{taskRows.map(({ task, depth }) => {
-            const rollup = getUserAddedProgressRollup(task, tasks);
+            const rollup = getUserAddedProgressRollup(task, taskContext);
             const warning = getUserAddedWeightWarning(rollup);
             const displayProgress = trackingMetrics[task.id]?.displayProgress;
             return <tr key={task.id}>
             <td style={{ paddingLeft: 12 + Math.min(depth, 8) * 16 }}><div>{task.name}</div>{task.task_source === 'user_added' && <span className={styles.muted}>User-added</span>}</td>
-            <td>{task.status}</td><td><div className={styles.progress}><progress max={100} value={displayProgress ?? 0} aria-label={`${task.name} progress`} /><span>{formatProgress(displayProgress)}</span>{rollup.calculatedProgress !== null && <span className={styles.muted}>From user-added subtasks</span>}</div></td>
+            <td>{task.status}</td><td><div className={styles.progress}><progress max={100} value={displayProgress ?? 0} aria-label={`${task.name} progress`} /><span>{formatProgress(displayProgress)}</span>{trackingMetrics[task.id]?.trackingProgressSource && <span className={styles.muted}>{trackingMetrics[task.id].trackingProgressSource === 'as_children' ? 'From AS subtasks' : 'From user-added subtasks'}</span>}</div></td>
             <td className={styles.preWrap}>{task.progress_summary || '-'}{warning && <div className={styles.weightWarning}>{warning}</div>}</td><td>{task.weight ?? '-'}</td><td>{task.task_source === 'user_added' ? getTrackingWeightDisplay(task).value : '-'}</td><td>{getWorkTypeLabel(task.work_type)}</td><td>{formatMonthlyReviewDate((task as MonthlyReviewTask).updated_at)}</td>
           </tr>;
           })}</tbody>

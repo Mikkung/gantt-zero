@@ -3,10 +3,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Task, Profile, TaskFrequencyUnit, TaskSource } from '../types';
-import { formatNumber, generateDeterministicProgressSummary } from '../utils/taskProgress';
+import { formatNumber, formatProgress, generateDeterministicProgressSummary } from '../utils/taskProgress';
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
 import {
-  getUserAddedProgressRollup, getUserAddedWeightWarning, parseUserAddedWeight, previewUserAddedWeight,
+  calculateTrackingProgressMetrics, getUserAddedProgressRollup, getUserAddedWeightWarning, parseUserAddedWeight, previewUserAddedWeight,
   USER_ADDED_WEIGHT_HELP, USER_ADDED_WEIGHT_LABEL,
 } from '../utils/userAddedProgress';
 
@@ -126,6 +126,8 @@ export default function TaskModal({
   const autoWeightPreview = previewUserAddedWeight(effectiveParentId, allTasks,
     task ? { ...task, parent_id: effectiveParentId, task_source: 'user_added', user_added_weight_is_manual: false } : null);
   const displayedUserAddedWeight = isManualWeight ? userAddedWeight : autoWeightPreview.weight;
+  const trackingMetric = useMemo(() => isOpen && task
+    ? calculateTrackingProgressMetrics([task], allTasks)[task.id] : undefined, [isOpen, task, allTasks]);
 
   // ประเภทงาน
   const [workType, setWorkType] = useState<WorkType | ''>('');
@@ -691,7 +693,7 @@ export default function TaskModal({
               <div style={{ marginTop: 12 }} className="range-row">
                 <div className="field-label">Tracking</div>
                 <div className="range-header">
-                  <span>Progress</span>
+                  <span>{trackingMetric?.trackingProgressSource ? 'Recorded progress' : 'Progress'}</span>
                   <span>{progress}%</span>
                 </div>
                 <input
@@ -704,6 +706,9 @@ export default function TaskModal({
                   onChange={(e) => handleProgressChange(Number(e.target.value))}
                   disabled={disabled}
                 />
+                {trackingMetric?.trackingProgressSource && <div className="field-label-small" data-testid="tracking-progress">
+                  Tracking progress: {formatProgress(trackingMetric.displayProgress)}
+                </div>}
               </div>
 
               {isUserAddedMode ? (

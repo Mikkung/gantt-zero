@@ -16,7 +16,7 @@ import {
 } from '../utils/taskProgress';
 import {
   calculateTrackingProgressMetrics, getUserAddedProgressRollup,
-  getTrackingWeightDisplay, getUserAddedWeightWarning, parseUserAddedWeight,
+  getTrackingTaskContext, getTrackingWeightDisplay, getUserAddedWeightWarning, parseUserAddedWeight,
 } from '../utils/userAddedProgress';
 import {
   getHierarchicalTaskRows,
@@ -108,20 +108,19 @@ export default function HomePage() {
   const loadTasks = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .order('start_date', { ascending: true });
-
-      if (error) {
-        console.error('loadTasks error:', {
-          message: error.message,
-          details: (error as any).details,
-          hint: (error as any).hint,
-        });
-      } else if (data) {
-        setTasks(sanitizeTaskList(data as Task[], 'loadTasks'));
+      const rows: Task[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await supabase.from('tasks').select('*')
+          .order('start_date', { ascending: true }).order('id', { ascending: true })
+          .range(offset, offset + 499);
+        if (error) {
+          console.error('loadTasks error:', { message: error.message, details: error.details, hint: error.hint });
+          return;
+        }
+        rows.push(...(data ?? []) as Task[]);
+        if (!data || data.length < 500) break;
       }
+      setTasks(sanitizeTaskList(rows, 'loadTasks'));
     } catch (err) {
       console.error('loadTasks unexpected error:', err);
     } finally {
@@ -275,7 +274,7 @@ export default function HomePage() {
     !!currentProfile && currentProfile.role !== 'manager';
   const isAdmin = currentProfile?.role === 'admin';
   const renderSafeTasks = useMemo(
-    () => sanitizeTaskList(tasks, 'render'),
+    () => getTrackingTaskContext(sanitizeTaskList(tasks, 'render')),
     [tasks],
   );
 
@@ -464,7 +463,7 @@ export default function HomePage() {
   };
 
   const handleTaskClick = (task: Task) => {
-    const storedTask = renderSafeTasks.find(candidate => candidate.id === task.id);
+    const storedTask = tasks.find(candidate => candidate.id === task.id);
     if (!storedTask) return;
     setFixedChildParentTask(null);
     setSelectedTask(storedTask);
