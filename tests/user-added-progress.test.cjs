@@ -104,8 +104,103 @@ test('progress-only weight warnings tolerate rounding, including both boundaries
   assert.equal(progress.getUserAddedWeightWarning({ childCount: 0, totalWeight: 0, calculatedProgress: null }), null);
 });
 
+test('recursive tracking propagates zero-weight AS children and weighted AS siblings', () => {
+  const a = { ...parent, id: 'a', progress: 10 };
+  const b = { ...parent, id: 'b', parent_id: 'a', progress: 30, weight: 0 };
+  const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, parent_id: 'b' }));
+  const tasks = [a, b, ...activities];
+  const frozen = JSON.stringify(tasks);
+  const metrics = progress.calculateTrackingProgressMetrics(tasks);
+  assert.equal(metrics.b.displayProgress, 50);
+  assert.equal(metrics.a.displayProgress, 50);
+  assert.equal(metrics.a.trackingProgressSource, 'as_children');
+  assert.equal(metrics.b.trackingProgressSource, 'user_added');
+  assert.equal(JSON.stringify(tasks), frozen);
+  const weighted = [a, { ...b, weight: 40 }, { ...parent, id: 'c', parent_id: 'a', weight: 60, progress: 80 }, ...activities];
+  assert.equal(progress.calculateTrackingProgressMetrics(weighted).a.displayProgress, 68);
+  const zeroSiblings = [a, { ...b, progress: 20 }, { ...b, id: 'c', progress: 80 }];
+  assert.equal(progress.calculateTrackingProgressMetrics(zeroSiblings).a.displayProgress, 50);
+  assert.equal(progress.calculateTrackingProgressMetrics([a, { ...b, progress: 0 }]).a.displayProgress, 0);
+});
+
+test('recursive tracking uses complete context, effective AS weights and AS children before activities', () => {
+  const a = { ...parent, id: 'a', progress: 10 };
+  const b = { ...parent, id: 'b', parent_id: 'a', weight: 99, progress: 30 };
+  const c = { ...parent, id: 'c', parent_id: 'b', weight: 40, progress: 0 };
+  const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, parent_id: 'c' }));
+  const supporting = { ...child('supporting', 100, 100), parent_id: 'a' };
+  const sibling = { ...parent, id: 'other-as', parent_id: 'a', weight: 60, progress: 80 };
+  const context = [a, b, c, sibling, supporting, ...activities];
+  const metrics = progress.calculateTrackingProgressMetrics([a, b, c], context);
+  assert.equal(metrics.c.displayProgress, 50);
+  assert.equal(metrics.b.displayProgress, 50);
+  assert.equal(metrics.a.displayProgress, 68, 'B effective official weight is 40, not its recorded 99');
+  const parentOnly = progress.calculateTrackingProgressMetrics([a], context);
+  assert.deepEqual(Object.keys(parentOnly), ['a']);
+  assert.equal(parentOnly.a.displayProgress, 68);
+  assert.equal(progress.calculateTrackingProgressMetrics([c, b, a], [...context].reverse()).a.displayProgress, 68);
+  const noSibling = context.filter(task => task.id !== 'other-as');
+  assert.equal(progress.calculateTrackingProgressMetrics([a], noSibling).a.displayProgress, 50);
+  assert.equal(supporting.progress, 100, 'supporting activities stay visible and unchanged, but do not double-count');
+});
+
+test('tracking falls back to recorded progress when children are unusable', () => {
+  const a = { ...parent, progress: 27 };
+  const invalid = { ...parent, id: 'invalid', parent_id: a.id, progress: null, weight: 40 };
+  const notFinite = { ...invalid, id: 'not-finite', progress: NaN };
+  assert.equal(progress.calculateTrackingProgressMetrics([a, invalid, notFinite])[a.id].displayProgress, 27);
+  const added = { ...child('invalid-added', null, 100), parent_id: a.id };
+  assert.equal(progress.calculateTrackingProgressMetrics([a, added])[a.id].displayProgress, 27);
+  const zero = { ...child('zero', 100, 0), parent_id: a.id };
+  assert.equal(progress.calculateTrackingProgressMetrics([a, zero])[a.id].displayProgress, 27);
+  const positive = { ...invalid, progress: 60 };
+  const zeroWeight = { ...invalid, id: 'no-weight', progress: 100, weight: 0 };
+  assert.equal(progress.calculateTrackingProgressMetrics([a, positive, zeroWeight])[a.id].displayProgress, 60);
+});
+
+test('tracking handles cycles, missing parents, duplicate IDs and malformed rows without mutating input', () => {
+  const a = { ...parent, id: 'a', parent_id: 'b', progress: 15 };
+  const b = { ...parent, id: 'b', parent_id: 'a', progress: 80 };
+  const self = { ...parent, id: 'self', parent_id: 'self', progress: 45 };
+  const orphan = { ...parent, id: 'orphan', parent_id: 'missing', progress: 65 };
+  const tasks = [a, b, self, orphan, { ...a, progress: 99 }, { ...parent, id: '' }, { ...parent, id: 'unnamed', name: '' }];
+  const before = JSON.stringify(tasks);
+  const metrics = progress.calculateTrackingProgressMetrics(tasks);
+  assert.deepEqual(Object.keys(metrics), ['a', 'b', 'self', 'orphan']);
+  assert.equal(metrics.a.displayProgress, 15);
+  assert.equal(metrics.b.displayProgress, 80);
+  assert.equal(metrics.self.displayProgress, 45);
+  assert.equal(metrics.orphan.displayProgress, 65);
+  assert.equal(progress.calculateTrackingProgressMetrics([b, a]).a.displayProgress, 15);
+  assert.equal(JSON.stringify(tasks), before);
+});
+
+test('recursive tracking preserves official assessment weights, contributions, scores and snapshots', () => {
+  const a = { ...parent, id: 'a', weight: 100, progress: 10 };
+  const b = { ...parent, id: 'b', parent_id: 'a', weight: 40, progress: 20 };
+  const c = { ...parent, id: 'c', parent_id: 'a', weight: 60, progress: 80 };
+  const tasks = [a, b, c, ...[child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, parent_id: 'b' }))];
+  const official = loadTs('utils/taskProgress.ts');
+  const assessment = loadTs('utils/assessment.ts');
+  const scoring = loadTs('utils/scoring.ts');
+  const before = JSON.stringify(tasks);
+  const baseline = official.calculateTaskProgressMetrics(tasks);
+  const snapshots = assessment.createAssessmentTaskSnapshots('period', profile.display_name, tasks);
+  const settings = { workload_factor: 0.7, score_level_values: scoring.DEFAULT_SCORE_LEVEL_VALUES };
+  const answers = [{ task_id: 'b', self_progress_score: 4 }, { task_id: 'c', self_progress_score: 3 }];
+  const score = scoring.calculateTotalWorkloadContribution(answers, tasks, settings);
+  const metrics = progress.calculateTrackingProgressMetrics(tasks);
+  assert.equal(metrics.a.displayProgress, 68);
+  for (const task of tasks) for (const key of ['weight', 'displayWeight', 'isComputedWeight', 'weightedContribution', 'childCount']) {
+    assert.equal(metrics[task.id][key], baseline[task.id][key], `${task.id}.${key}`);
+  }
+  assert.deepEqual(assessment.createAssessmentTaskSnapshots('period', profile.display_name, tasks), snapshots);
+  assert.equal(scoring.calculateTotalWorkloadContribution(answers, tasks, settings), score);
+  assert.equal(JSON.stringify(tasks), before);
+});
+
 // Exercise the real components' form/download/import handlers with controlled hooks.
-function componentHarness(filename, initialProps, client = {}, overrides = {}) {
+function componentHarness(filename, initialProps, client = {}, overrides = {}, componentName = 'default') {
   const slots = [];
   let cursor = 0;
   let effects = [];
@@ -130,7 +225,7 @@ function componentHarness(filename, initialProps, client = {}, overrides = {}) {
       }
     },
   };
-  const Component = loadTs(filename, { react: { ...require('react'), ...hooks }, '../utils/supabase': { supabase: client }, './supabase': { supabase: client }, ...overrides }).default;
+  const Component = loadTs(filename, { react: { ...require('react'), ...hooks }, '../utils/supabase': { supabase: client }, '../../utils/supabase': { supabase: client }, './supabase': { supabase: client }, ...overrides })[componentName];
   return {
     render(nextProps = props) {
       props = nextProps;
@@ -158,6 +253,105 @@ function textOf(tree) {
   return textOf(tree.props?.children);
 }
 const button = (tree, label) => elements(tree).find(item => item.type === 'button' && textOf(item) === label);
+
+test('TaskModal shows recursive tracking separately and saves recorded progress only', () => {
+  const a = { ...parent, progress: 15 };
+  const b = { ...parent, id: 'b', parent_id: a.id, weight: 0, progress: 20 };
+  const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, parent_id: 'b' }));
+  const saved = [];
+  const harness = componentHarness('components/TaskModal.tsx', { isOpen: true, task: a, allTasks: [a, b, ...activities],
+    currentUser: profile, onSave: row => saved.push(row), onClose() {}, onDelete() {} });
+  const tree = harness.render();
+  assert.match(textOf(elements(tree).find(item => item.props?.['data-testid'] === 'tracking-progress')), /50%/);
+  assert.equal(elements(tree).find(item => item.type === 'input' && item.props.type === 'range').props.value, 15);
+  button(tree, 'Save changes').props.onClick();
+  assert.equal(saved[0].progress, 15);
+});
+
+test('Monthly Review uses authorized context while rendering only the selected employee tasks', async () => {
+  const reviewer = { ...profile, id: 'admin', role: 'admin' };
+  const a = { ...parent, progress: 15 };
+  const b = { ...parent, id: 'b', name: 'Other authorized employee task', assignee: 'Other staff', parent_id: a.id, weight: 0, progress: 20 };
+  const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, assignee: 'Other staff', parent_id: 'b' }));
+  const calls = [];
+  const client = { auth: { getUser: async () => ({ data: { user: { id: reviewer.id } }, error: null }) },
+    from: () => ({ select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: reviewer, error: null }) }) };
+  const monthly = loadTs('utils/monthlyReviews.ts', { './supabase': { supabase: client } });
+  const router = { replace() {} };
+  const harness = componentHarness('components/monthly-reviews/MonthlyReviews.tsx', { mode: 'admin' }, client, {
+    'next/navigation': { useParams: () => ({ period_id: 'period', employee_id: profile.display_name }), useRouter: () => router },
+    'next/link': { __esModule: true, default: () => null },
+    './MonthlyReviews.module.css': {},
+    '../../utils/monthlyReviews': { ...monthly, loadMonthlyRows: async (table, filters = {}) => {
+      calls.push({ table, filters });
+      if (table === 'profiles') return [profile];
+      if (table === 'monthly_review_periods') return [{ id: 'period', name: 'October review', year: 2026, month: 10, status: 'open' }];
+      if (table === 'tasks') return [a, b, ...activities];
+      return [];
+    } },
+  }, 'MonthlyEmployeePage');
+  let tree;
+  for (let i = 0; i < 30; i++) {
+    tree = harness.render();
+    if (elements(tree).some(item => item.type === 'progress')) break;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(elements(tree).find(item => item.type === 'progress').props.value, 50);
+  assert.equal(textOf(tree).includes(b.name), false);
+  assert.match(textOf(tree), /From AS subtasks/);
+  assert.deepEqual(calls.find(call => call.table === 'tasks').filters, {});
+});
+
+test('main views use complete paginated task context for recursive progress', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const a = { ...parent, start_date: today, end_date: today, progress: 15, status: 'To Do', priority: 'Medium' };
+  const b = { ...parent, id: 'branch', name: 'Nested AS branch', parent_id: a.id, weight: 0, progress: 20 };
+  const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, parent_id: b.id }));
+  const database = [a, ...Array.from({ length: 499 }, (_, i) => ({ ...a, id: `filler-${i}`, name: `Filler ${i}`, weight: 0 })), b, ...activities];
+  const pages = [];
+  const client = { auth: { getSession: async () => ({ data: { session: { user: { id: profile.id, email: 'staff@example.test' } } } }) },
+    from(table) {
+      let start = 0;
+      let end = 499;
+      return { select() { return this; }, eq() { return this; }, limit() { return this; }, order() { return this; },
+        range(first, last) { start = first; end = last; return this; },
+        then(resolve) {
+          if (table === 'tasks') pages.push([start, end]);
+          return Promise.resolve({ data: table === 'tasks' ? database.slice(start, end + 1) : table === 'profiles' ? [profile] : [], error: null }).then(resolve);
+        } };
+    } };
+  function GanttChart() { return null; }
+  const router = { push() {} };
+  const harness = componentHarness('app/page.tsx', {}, client, {
+    'next/navigation': { useRouter: () => router },
+    '../components/AppShell': { AppShell: () => null },
+    '../components/GanttChart': { __esModule: true, default: GanttChart },
+    '../components/TaskModal': { __esModule: true, default: () => null },
+    '../components/AddedTaskBulkImportModal': { __esModule: true, default: () => null },
+  });
+  let tree;
+  for (let i = 0; i < 30; i++) {
+    tree = harness.render();
+    if (elements(tree).some(item => item.type === GanttChart)) break;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  const chart = elements(tree).find(item => item.type === GanttChart);
+  assert.ok(chart);
+  assert.deepEqual(pages, [[0, 499], [500, 999]]);
+  assert.equal(chart.props.tasks.find(task => task.id === a.id).calculated_progress, 50);
+  assert.equal(chart.props.tasks.find(task => task.id === b.id).calculated_progress, 50);
+  for (const view of ['list', 'board', 'calendar']) {
+    tree.props.onChangeView(view);
+    tree = harness.render();
+    const componentName = `Tasks${view[0].toUpperCase()}${view.slice(1)}View`;
+    const viewElement = elements(tree).find(item => item.type?.name === componentName);
+    assert.ok(viewElement, componentName);
+    const renderedView = viewElement.type(viewElement.props);
+    assert.ok(elements(renderedView).some(item => ['tr', 'div', 'button'].includes(item.type) &&
+      typeof item.props.onClick === 'function' && textOf(item).includes(a.name) && textOf(item).includes('50%')), `${view} must show recursive tracking progress`);
+  }
+  assert.equal(database[0].progress, 15);
+});
 
 test('TaskModal switches weight fields and saves only safe user-added values', () => {
   const saved = [];
@@ -326,7 +520,7 @@ test('app save/create/delete persists balance calls and replaces state with auth
       const query = {
         select(columns) { queries.push({ table, columns }); return this; },
         eq(key, value) { if (key === 'id') id = value; return this; },
-        limit() { return this; }, order() { return this; },
+        limit() { return this; }, order() { return this; }, range() { return this; },
         update(row) { payload = row; updates.push(row); return this; },
         async single() {
           const index = database.findIndex(row => row.id === id);
