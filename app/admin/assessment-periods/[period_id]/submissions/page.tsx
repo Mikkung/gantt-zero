@@ -9,6 +9,7 @@ import {
   getSubmissionStatusLabel,
 } from '../../../../../utils/scoring';
 import { supabase } from '../../../../../utils/supabase';
+import { tasksAtAssessmentPeriod } from '../../../../../utils/asRevisionHistory';
 import { countsTowardAssessment } from '../../../../../utils/taskSource';
 import type {
   AssessmentPeriod,
@@ -84,7 +85,7 @@ export default function SelfEvaluationSubmissionsAdminPage() {
     setSubmissions((submissionsResult.data ?? []) as SelfEvaluationSubmission[]);
     setTaskEvaluations((taskEvalResult.data ?? []) as TaskSelfEvaluation[]);
     setSnapshots((snapshotsResult.data ?? []) as AssessmentTaskSnapshot[]);
-    setTasks((tasksResult.data ?? []) as Task[]);
+    setTasks(tasksAtAssessmentPeriod((tasksResult.data ?? []) as Task[], periodResult.data as AssessmentPeriod));
     setProfiles((profilesResult.data ?? []) as Profile[]);
   };
 
@@ -266,7 +267,8 @@ export default function SelfEvaluationSubmissionsAdminPage() {
       if (latestTasksResult.error) throw latestTasksResult.error;
       if (existingSnapshotsResult.error) throw existingSnapshotsResult.error;
 
-      const latestTasks = (latestTasksResult.data ?? []) as Task[];
+      if (!period) throw new Error('Load the assessment period before syncing.');
+      const latestTasks = tasksAtAssessmentPeriod((latestTasksResult.data ?? []) as Task[], period);
       const existingSnapshots =
         (existingSnapshotsResult.data ?? []) as AssessmentTaskSnapshot[];
       const taskById = new Map(latestTasks.map((task) => [task.id, task]));

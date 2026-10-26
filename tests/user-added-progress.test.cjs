@@ -200,7 +200,7 @@ test('recursive tracking preserves official assessment weights, contributions, s
 });
 
 // Exercise the real components' form/download/import handlers with controlled hooks.
-function componentHarness(filename, initialProps, client = {}, overrides = {}, componentName = 'default') {
+function componentHarness(filename, initialProps, client = {}, overrides = {}, componentName = 'default', createRefValue = value => value) {
   const slots = [];
   let cursor = 0;
   let effects = [];
@@ -211,10 +211,14 @@ function componentHarness(filename, initialProps, client = {}, overrides = {}, c
       if (!slots[index]) slots[index] = { value: typeof initial === 'function' ? initial() : initial };
       return [slots[index].value, value => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value; }];
     },
-    useMemo(fn) { cursor++; return fn(); },
+    useMemo(fn, deps) {
+      const index = cursor++;
+      if (!slots[index] || !deps || deps.some((value, i) => value !== slots[index].deps[i])) slots[index] = { deps, value: fn() };
+      return slots[index].value;
+    },
     useRef(initial) {
       const index = cursor++;
-      if (!slots[index]) slots[index] = { current: initial };
+      if (!slots[index]) slots[index] = { current: createRefValue(initial) };
       return slots[index];
     },
     useEffect(fn, deps) {
@@ -253,6 +257,101 @@ function textOf(tree) {
   return textOf(tree.props?.children);
 }
 const button = (tree, label) => elements(tree).find(item => item.type === 'button' && textOf(item) === label);
+
+test('Gantt colors follow visual completion, preserve status and give blocked tasks red priority', () => {
+  const { getGanttProgressVisual } = loadTs('utils/ganttProgress.ts');
+  for (const [value, state] of [[0, 'not-started'], [0.01, 'active'], [50, 'active'], [99.99, 'active'], [100, 'complete']]) {
+    const task = { ...parent, status: 'Done', progress: 0, calculated_progress: value };
+    assert.equal(getGanttProgressVisual(task).className, `progress-${state} progress-computed`);
+    assert.equal(getGanttProgressVisual(task).progress, value);
+    assert.equal(task.status, 'Done');
+  }
+  assert.equal(getGanttProgressVisual({ ...parent, status: 'To Do', progress: 100 }).className, 'progress-complete');
+  assert.equal(getGanttProgressVisual({ ...parent, progress: 100, calculated_progress: 0 }).progress, 0);
+  assert.equal(getGanttProgressVisual({ ...parent, progress: 25, calculated_progress: null }).isComputed, false);
+  for (const status of ['Blocked', 'In problem Need Help', 'In Problem Need Help']) for (const value of [0, 50, 100]) {
+    assert.match(getGanttProgressVisual({ ...parent, status, calculated_progress: value }).className, /^progress-blocked /);
+  }
+  for (const [value, expected] of [[-5, 0], [120, 100], [NaN, 0]]) {
+    assert.equal(getGanttProgressVisual({ ...parent, progress: value }).progress, expected);
+  }
+});
+
+test('Gantt rebuilds recursive yellow/green bars and blocks computed writes while allowing leaf edits', async () => {
+  const previousWindow = global.window;
+  global.window = { innerWidth: 1280, localStorage: { getItem: () => '300', setItem() {} }, addEventListener() {}, removeEventListener() {} };
+  const constructions = [];
+  const writes = [];
+  let reloads = 0;
+  class FrappeStub {
+    constructor(container, tasks, options) { constructions.push({ tasks, options }); }
+    set_scroll_position() {}
+  }
+  const client = { from(table) {
+    assert.equal(table, 'tasks');
+    return { update(payload) { return { async eq(key, id) { writes.push({ payload, key, id }); return { error: null }; } }; } };
+  } };
+  const a = { ...parent, id: 'a', status: 'Done', end_date: parent.start_date };
+  const b = { ...a, id: 'b', parent_id: a.id, name: 'AS B', weight: 0, status: 'To Do' };
+  const first = { ...child('first', 100, 50), parent_id: b.id, status: 'Done', end_date: a.end_date };
+  const second = { ...first, id: 'second', name: 'Second', progress: 0 };
+  const editable = { ...first, id: 'editable', name: 'Supporting task', parent_id: a.id, progress: 25, user_added_weight: 0 };
+  const context = [a, b, first, second, editable];
+  const withTracking = rows => {
+    const metrics = progress.calculateTrackingProgressMetrics(rows);
+    return rows.map(task => ({ ...task, calculated_progress: metrics[task.id].calculatedProgress }));
+  };
+  const props = { tasks: withTracking(context), onTaskUpdate: () => { reloads++; }, onTaskClick() {} };
+  try {
+    const harness = componentHarness('components/GanttChart.tsx', props, client, {
+      'frappe-gantt/dist/frappe-gantt.css': {},
+      'frappe-gantt': { __esModule: true, default: FrappeStub },
+    }, 'default', value => value === null ? { innerHTML: '', scrollTop: 0, addEventListener() {}, removeEventListener() {} } : value);
+    let tree = harness.render();
+    const category = elements(tree).find(item => item.props?.className === 'gantt-tree-row gantt-tree-row-category');
+    assert.ok(category);
+    category.props.onClick();
+    tree = harness.render();
+    let chart = constructions.at(-1);
+    for (const id of [a.id, b.id]) {
+      assert.equal(chart.tasks.find(task => task.id === id).progress, 50);
+      assert.equal(chart.tasks.find(task => task.id === id).custom_class, 'progress-active progress-computed');
+      await chart.options.on_progress_change({ id, progress: 75 }, 75);
+    }
+    assert.equal(writes.length, 0);
+    await chart.options.on_progress_change({ id: editable.id }, 75);
+    assert.deepEqual(writes, [{ payload: { progress: 75 }, key: 'id', id: editable.id }]);
+    assert.equal(reloads, 1);
+    const previousCount = constructions.length;
+    harness.render({ ...props, tasks: withTracking(context.map(task => task.id === second.id ? { ...task, progress: 100 } : task)) });
+    assert.ok(constructions.length > previousCount, 'a task-data reload must rebuild the chart without a browser refresh');
+    chart = constructions.at(-1);
+    for (const id of [a.id, b.id]) {
+      assert.equal(chart.tasks.find(task => task.id === id).progress, 100);
+      assert.equal(chart.tasks.find(task => task.id === id).custom_class, 'progress-complete progress-computed');
+    }
+    harness.render({ ...props, tasks: withTracking(context.map(task => [first.id, second.id].includes(task.id) ? { ...task, progress: 0 } : task)) });
+    chart = constructions.at(-1);
+    assert.equal(chart.tasks.find(task => task.id === a.id).custom_class, 'progress-not-started progress-computed');
+    await chart.options.on_progress_change({ id: a.id }, 60);
+    assert.equal(writes.length, 1, 'computed zero is also read-only');
+    assert.equal(a.progress, 20);
+    assert.equal(a.status, 'Done');
+    for (const label of ['0%', '0% < Progress < 100%', '100%', 'Blocked / Need Help']) assert.ok(textOf(tree).includes(label));
+  } finally { global.window = previousWindow; }
+});
+
+test('Gantt CSS shares legend/fill colors, overrides hover styles and hides only computed progress handles', () => {
+  const css = fs.readFileSync('app/globals.css', 'utf8');
+  for (const [state, color] of [['not-started', '#e5e7eb'], ['active', '#f7d448'], ['complete', '#5ada9e'], ['blocked', '#eb5858']]) {
+    assert.ok(css.includes(`.gantt-wrapper .progress-${state} {\n  --gantt-progress-color: ${color};`) ||
+      css.includes(`.gantt-wrapper .progress-${state} {\r\n  --gantt-progress-color: ${color};`));
+  }
+  assert.match(css, /\.gantt-wrapper \.gantt-legend-color\s*\{\s*background-color: var\(--gantt-progress-color\)/);
+  assert.match(css, /\.gantt-wrapper \.gantt \.bar-wrapper\[class\*="progress-"\] \.bar-progress\s*\{\s*fill: var\(--gantt-progress-color\)/);
+  assert.match(css, /\.progress-computed \.handle\.progress\s*\{\s*display: none;\s*pointer-events: none/);
+  assert.doesNotMatch(css, /\.status-(todo|done|inprogress|inproblemneedhelp) \.bar-progress/);
+});
 
 test('TaskModal shows recursive tracking separately and saves recorded progress only', () => {
   const a = { ...parent, progress: 15 };

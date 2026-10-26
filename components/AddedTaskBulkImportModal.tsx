@@ -806,7 +806,7 @@ export default function AddedTaskBulkImportModal({
 
       const dbParentMap = new Map<string, Task>();
       (dbParents as Task[] | null)?.forEach((task) => {
-        dbParentMap.set(task.id, task);
+        if (task.as_archived_at == null) dbParentMap.set(task.id, task);
       });
 
       const seenClientRefs = new Set<string>();

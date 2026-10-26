@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { tasksAtAssessmentPeriod } from '../../../../utils/asRevisionHistory';
 import { createClient } from '@supabase/supabase-js';
 import type {
   AssessmentAiSummary,
@@ -239,7 +240,7 @@ export async function POST(request: NextRequest) {
   const snapshots = (snapshotsResult.data ?? []) as AssessmentTaskSnapshot[];
   const taskEvaluations =
     (taskEvaluationsResult.data ?? []) as TaskSelfEvaluation[];
-  const supplementaryTasks = (tasksResult.data ?? []) as Task[];
+  const supplementaryTasks = tasksAtAssessmentPeriod((tasksResult.data ?? []) as Task[], period);
   const sourceRows = getAiSummarySourceRows({
     snapshots,
     taskEvaluations,

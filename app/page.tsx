@@ -105,8 +105,8 @@ export default function HomePage() {
   const [initError, setInitError] = useState<string | null>(null);
 
   // ========= โหลด tasks =========
-  const loadTasks = async () => {
-    setLoading(true);
+  const loadTasks = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       const rows: Task[] = [];
       for (let offset = 0; ; offset += 500) {
@@ -124,9 +124,16 @@ export default function HomePage() {
     } catch (err) {
       console.error('loadTasks unexpected error:', err);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!currentProfile || typeof window === 'undefined') return;
+    const refresh = () => { void loadTasks(false); };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [currentProfile?.id]);
 
   // ========= Initial load: auth session + profile + teams + users + tasks =========
   useEffect(() => {
@@ -1667,7 +1674,7 @@ export default function HomePage() {
         key={selectedTask?.id ?? (fixedChildParentTask ? `child:${fixedChildParentTask.id}` : 'new-task')}
         isOpen={isModalOpen}
         task={selectedTask}
-        allTasks={tasks}
+        allTasks={renderSafeTasks}
         users={users}
         currentUser={currentProfile}
         canEdit={canEditTasks}
@@ -1686,7 +1693,7 @@ export default function HomePage() {
       <AddedTaskBulkImportModal
         isOpen={isAddedTaskImportOpen}
         initialMode={addedTaskImportMode}
-        tasks={tasks}
+        tasks={renderSafeTasks}
         currentProfile={currentProfile}
         onClose={() => setIsAddedTaskImportOpen(false)}
         onImported={loadTasks}

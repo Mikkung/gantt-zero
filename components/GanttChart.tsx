@@ -15,6 +15,7 @@ import {
 } from '../utils/taskProgress';
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
 import { getTrackingWeightDisplay } from '../utils/userAddedProgress';
+import { GANTT_PROGRESS_LEGEND, getGanttProgressVisual } from '../utils/ganttProgress';
 
 interface GanttProps {
   tasks: Task[];
@@ -603,6 +604,7 @@ export default function GanttChart({
 
       if (row.kind === 'task') {
         const t = row.task;
+        const visual = getGanttProgressVisual(t);
 
         const fallbackSpan = makeSpan(t.start_date, t.end_date);
         const finalSpan = rowSpan ?? fallbackSpan;
@@ -620,11 +622,9 @@ export default function GanttChart({
           name: buildTaskDisplayLabel(t),
           start: startStr,
           end: endStr,
-          progress: t.calculated_progress ?? t.progress ?? 0,
+          progress: visual.progress,
           dependencies: t.dependencies || '',
-          custom_class: `status-${(t.status || '')
-            .toLowerCase()
-            .replace(/\s/g, '')}`,
+          custom_class: visual.className,
         };
       }
 
@@ -752,7 +752,8 @@ export default function GanttChart({
       },
       on_progress_change: async (task: any, progress: number) => {
         const original = taskById[task.id];
-        if (!original) return;
+        // Frappe mutates its own row before this callback; only leaf/recorded progress may be saved.
+        if (!original || getGanttProgressVisual(original).isComputed) return;
 
         const { error } = await supabase
           .from('tasks')
@@ -908,27 +909,10 @@ export default function GanttChart({
 
         <div style={{ textAlign: 'right' }}>
           <div className="gantt-legend">
-            <div className="gantt-legend-item">
-              <span
-                className="gantt-legend-color"
-                style={{ backgroundColor: '#e5e7eb' }}
-              />
-              <span>To Do</span>
-            </div>
-            <div className="gantt-legend-item">
-              <span
-                className="gantt-legend-color"
-                style={{ backgroundColor: '#f7d448' }}
-              />
-              <span>In Progress</span>
-            </div>
-            <div className="gantt-legend-item">
-              <span
-                className="gantt-legend-color"
-                style={{ backgroundColor: '#5ada9e' }}
-              />
-              <span>Done</span>
-            </div>
+            {GANTT_PROGRESS_LEGEND.map(item => <div className="gantt-legend-item" key={item.state}>
+              <span className={`gantt-legend-color progress-${item.state}`} />
+              <span>{item.label}</span>
+            </div>)}
           </div>
 
           <div

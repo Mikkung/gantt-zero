@@ -10,6 +10,7 @@ import {
   isSelfEvaluationOpen,
 } from '../../../../utils/assessment';
 import { supabase } from '../../../../utils/supabase';
+import { tasksAtAssessmentPeriod } from '../../../../utils/asRevisionHistory';
 import { formatNumber } from '../../../../utils/taskProgress';
 import {
   calculateTaskWorkloadContribution,
@@ -268,7 +269,7 @@ export default function EmployeeAssessmentDetailPage() {
         if (tasksResult.error) throw tasksResult.error;
 
         const employeeTasks = getEmployeeTasksForAssessment(
-          (tasksResult.data ?? []) as Task[],
+          tasksAtAssessmentPeriod((tasksResult.data ?? []) as Task[], periodResult.data as AssessmentPeriod),
           currentEmployeeId,
         );
 
