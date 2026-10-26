@@ -1,6 +1,7 @@
 import type { Task } from '../types';
 import { calculateEffectiveTaskWeight, calculateTaskProgressMetrics, formatNumber, toFiniteNumber } from './taskProgress';
 import { isOriginalAsTask } from './taskSource';
+import { isActiveAsTask } from './asRevisionHistory';
 
 export const USER_ADDED_WEIGHT_LABEL = 'น้ำหนักย่อยสำหรับคำนวณความคืบหน้า (%)';
 export const USER_ADDED_WEIGHT_HELP = 'ระบบคำนวณน้ำหนักย่อยให้อัตโนมัติ แต่สามารถแก้เองได้ และไม่กระทบคะแนนประเมิน';
@@ -36,7 +37,7 @@ export function parseUserAddedWeight(value: unknown): { value: number; error?: s
 
 export function calculateAutoUserAddedWeights(tasks: Task[], resetManual = false) {
   const unique = new Map<string, Task>();
-  for (const task of tasks) if (task.id && task.task_source === 'user_added' && !unique.has(task.id)) unique.set(task.id, task);
+  for (const task of tasks) if (task.id && isActiveAsTask(task) && task.task_source === 'user_added' && !unique.has(task.id)) unique.set(task.id, task);
   const siblings = [...unique.values()].sort((a, b) =>
     (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id),
   );
@@ -80,7 +81,7 @@ export function getUserAddedProgressRollup(parent: Task, tasks: Task[]): UserAdd
   let usableWeight = 0;
   const visited = new Set<string>();
   for (const child of tasks) {
-    if (!child.id || child.id === parent.id || visited.has(child.id) || child.parent_id !== parent.id || child.task_source !== 'user_added') continue;
+    if (!child.id || !isActiveAsTask(child) || child.id === parent.id || visited.has(child.id) || child.parent_id !== parent.id || child.task_source !== 'user_added') continue;
     visited.add(child.id);
     rollup.childCount += 1;
     const weight = parseUserAddedWeight(child.user_added_weight).value;
@@ -104,7 +105,7 @@ export function getUserAddedWeightWarning(rollup: UserAddedProgressRollup) {
 // A display-only forest: detach every cycle edge, not an arbitrary edge determined by row order.
 export function getTrackingTaskContext(tasks: Task[]) {
   const byId = new Map<string, Task>();
-  for (const task of tasks) if (task?.id && task.name && !byId.has(task.id)) byId.set(task.id, task);
+  for (const task of tasks) if (task?.id && task.name && isActiveAsTask(task) && !byId.has(task.id)) byId.set(task.id, task);
   const done = new Set<string>();
   const cyclic = new Set<string>();
   for (const task of byId.values()) {

@@ -23,6 +23,7 @@ export interface Profile {
   role: Role;
   team_id: string | null;
   avatar_url?: string | null;
+  is_active?: boolean | null;
 }
 
 
@@ -67,6 +68,21 @@ export interface Task {
   task_source?: TaskSource | null;
   counts_toward_assessment?: boolean | null;
   include_in_ai_summary?: boolean | null;
+  as_archived_at?: string | null;
+  as_revision_request_id?: string | null;
+  as_business_history?: {
+    replaced_at: string;
+    configuration: {
+      business: Partial<Task>;
+      parent_id?: string | null;
+      assignee?: string | null;
+      team_id?: string | null;
+      task_source?: TaskSource | null;
+      counts_toward_assessment?: boolean | null;
+      include_in_ai_summary?: boolean | null;
+      as_archived_at?: string | null;
+    } | null;
+  }[];
 }
 
 export type AssessmentPeriodStatus =

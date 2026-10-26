@@ -319,6 +319,7 @@ body.app-body {
 
 .gantt-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
@@ -338,6 +339,8 @@ body.app-body {
 
 .gantt-legend {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
   font-size: 11px;
   color: #64748b;
@@ -352,6 +355,7 @@ body.app-body {
 .gantt-legend-color {
   width: 12px;
   height: 12px;
+  flex-shrink: 0;
   border-radius: 3px;
 }
 
@@ -509,25 +513,34 @@ body.app-body {
   margin-top: 2px;
 }
 
-/* To Do */
-.gantt .bar-wrapper.status-todo .bar-progress {
+/* Shared by the SVG completion fill and its legend swatch, not task status. */
+.gantt-wrapper .progress-not-started {
+  --gantt-progress-color: #e5e7eb;
+}
+.gantt-wrapper .progress-active {
+  --gantt-progress-color: #f7d448;
+}
+.gantt-wrapper .progress-complete {
+  --gantt-progress-color: #5ada9e;
+}
+.gantt-wrapper .progress-blocked {
+  --gantt-progress-color: #eb5858;
+}
+.gantt-wrapper .gantt-legend-color {
+  background-color: var(--gantt-progress-color);
+}
+.gantt-wrapper .gantt .bar-wrapper[class*="progress-"] .bar {
   fill: #e5e7eb;
 }
-
-/* In Progress */
-.gantt .bar-wrapper.status-inprogress .bar-progress {
-  fill: #f7d448
-;
+.gantt-wrapper .gantt .bar-wrapper[class*="progress-"] .bar-progress {
+  fill: var(--gantt-progress-color);
 }
-
-/* Done */
-.gantt .bar-wrapper.status-done .bar-progress {
-  fill: #5ada9e;
+.gantt-wrapper .gantt .bar-wrapper.progress-blocked .bar {
+  fill: #fecaca;
 }
-
-/* In Problem */
-.gantt .bar-wrapper.status-inproblemneedhelp .bar-progress {
-  fill: #eb5858;
+.gantt-wrapper .gantt .bar-wrapper.progress-computed .handle.progress {
+  display: none;
+  pointer-events: none;
 }
 
 /* ------------ Modal, form, profile, login (ของเดิม) ------------ */

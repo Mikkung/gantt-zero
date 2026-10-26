@@ -11,6 +11,7 @@ import {
   getSubmissionStatusLabel,
 } from '../../../../../utils/scoring';
 import { supabase } from '../../../../../utils/supabase';
+import { tasksAtAssessmentPeriod } from '../../../../../utils/asRevisionHistory';
 import type {
   AssessmentPeriod,
   AssessmentTaskSnapshot,
@@ -162,7 +163,7 @@ export default function ManagerEvaluationsOverviewPage() {
           (managerSubmissionsResult.data ?? []) as ManagerEvaluationSubmission[],
         );
         setSnapshots((snapshotsResult.data ?? []) as AssessmentTaskSnapshot[]);
-        setTasks((tasksResult.data ?? []) as Task[]);
+        setTasks(tasksAtAssessmentPeriod((tasksResult.data ?? []) as Task[], periodResult.data as AssessmentPeriod));
         setSelfTaskEvaluations(
           (selfTaskEvalResult.data ?? []) as TaskSelfEvaluation[],
         );

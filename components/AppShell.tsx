@@ -1,10 +1,11 @@
 // components/AppShell.tsx
 'use client';
 
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Profile, Team } from '../types';
 import type { TaskSourceFilter } from '../utils/taskSource';
+import { supabase } from '../utils/supabase';
 
 type ViewType = 'gantt' | 'list' | 'board' | 'calendar';
 
@@ -62,6 +63,13 @@ export function AppShell({
   onSignOut,
 }: AppShellProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [pendingRevisions,setPendingRevisions]=useState(0);
+  useEffect(()=>{
+    if(!currentProfile||currentProfile.role==='user')return;
+    let active=true;
+    const load=async()=>{const {count,error}=await supabase.from('as_revision_requests').select('id',{count:'exact',head:true}).eq('status','submitted');if(active&&!error)setPendingRevisions(count??0);};
+    void load();window.addEventListener('focus',load);return()=>{active=false;window.removeEventListener('focus',load);};
+  },[currentProfile?.id,currentProfile?.role]);
 
   const viewItems: { key: ViewType; label: string }[] = [
     { key: 'list', label: 'List' },
@@ -311,6 +319,11 @@ export function AppShell({
           </div>
         )}
 
+        {currentProfile&&<div><div className="app-sidebar-section-title">AS REVISION</div><nav className="app-sidebar-nav">
+          {currentProfile.role==='admin'&&<Link href="/admin/as-revisions" style={{display:'flex',padding:'8px 10px',fontSize:13,color:'#475569',textDecoration:'none'}}>AS Revision Period Setup</Link>}
+          {currentProfile.role==='user'?<Link href="/employee/as-revisions" style={{display:'flex',padding:'8px 10px',fontSize:13,color:'#475569',textDecoration:'none'}}>My AS Revision</Link>
+            :<Link href={currentProfile.role==='admin'?'/admin/as-revisions/reviews':'/manager/as-revisions'} style={{display:'flex',padding:'8px 10px',fontSize:13,color:'#475569',textDecoration:'none'}}>AS Revision Review{pendingRevisions>0?` (${pendingRevisions})`:''}</Link>}
+        </nav></div>}
         {/* team / assignee */}
         <div>
           <div className="app-sidebar-section-title">Team</div>
