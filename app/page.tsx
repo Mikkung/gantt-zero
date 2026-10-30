@@ -9,6 +9,8 @@ import GanttChart from '../components/GanttChart';
 import TaskModal from '../components/TaskModal';
 import { supabase } from '../utils/supabase';
 import { rebalanceUserAddedWeights } from '../utils/userAddedWeightPersistence';
+import { getTaskNotes } from '../utils/taskNotes';
+import { updateOwnAsOriginalTask } from '../utils/asOriginalTaskEditing';
 import {
   calculateWorkloadSummary,
   formatNumber,
@@ -545,6 +547,20 @@ export default function HomePage() {
     try {
       if (!canEditTasks) return;
 
+      if (selectedTask && currentProfile?.role === 'user' && isOriginalAsTask(selectedTask)) {
+        if (selectedTask.assignee !== currentProfile.display_name) {
+          alert('You can edit only your own original AS tasks.'); return;
+        }
+        try {
+          const saved = await updateOwnAsOriginalTask(selectedTask.id, partial);
+          upsertTaskInState(saved);
+          setIsModalOpen(false);
+        } catch (error) {
+          alert('Cannot update task: ' + ((error as { message?: string })?.message ?? String(error)));
+        }
+        return;
+      }
+
       if (!partial.name || !partial.name.trim()) {
         alert('Please enter a task name.');
         return;
@@ -565,17 +581,6 @@ export default function HomePage() {
       const isUserRole = currentProfile?.role === 'user';
       const isCreating = !selectedTask;
       const isCreatingFixedChildTask = isCreating && !!fixedChildParentTask;
-
-      if (
-        selectedTask &&
-        isUserRole &&
-        isOriginalAsTask(selectedTask) &&
-        !window.confirm(
-          'งานนี้เป็นงานต้นฉบับจาก AS และอาจถูกใช้ประกอบการประเมินผล หากต้องการแตกงานเพื่อจัดการรายละเอียด แนะนำให้เพิ่มเป็นงานย่อยแทนการแก้ไขงานต้นฉบับ ต้องการบันทึกการแก้ไขต่อหรือไม่?',
-        )
-      ) {
-        return;
-      }
 
       if (isCreating && isUserRole) {
         if (!parentTask || !isOriginalAsTask(parentTask)) {
@@ -1042,8 +1047,8 @@ export default function HomePage() {
               {t.start_date}
             </td>
             <td style={{ padding: 6, textAlign: 'center' }}>{t.end_date}</td>
-            <td style={{ padding: 6, color: '#64748b' }}>
-              {t.progress_summary || '-'}
+            <td style={{ padding: 6, color: '#64748b', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+              {getTaskNotes(t) || '-'}
             </td>
           </tr>
         );
@@ -1069,7 +1074,7 @@ export default function HomePage() {
               <th style={{ padding: 6 }}>Contribution</th>
               <th style={{ padding: 6 }}>Start</th>
               <th style={{ padding: 6 }}>End</th>
-              <th style={{ padding: 6, textAlign: 'left' }}>Summary</th>
+              <th style={{ padding: 6, textAlign: 'left' }}>Description / Progress Summary</th>
             </tr>
           </thead>
           <tbody>
@@ -1639,6 +1644,7 @@ export default function HomePage() {
           ) : view === 'gantt' ? (
             <GanttChart
               tasks={tasksWithCalculatedProgress}
+              currentUser={currentProfile}
               onTaskUpdate={loadTasks}
               onTaskClick={handleTaskClick}
               onAddSubtask={handleAddSubtask}

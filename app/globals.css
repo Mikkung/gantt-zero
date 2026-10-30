@@ -931,6 +931,16 @@ body.app-body {
   width: 100%;
 }
 
+.as-original-restricted input:disabled,
+.as-original-restricted select:disabled {
+  background: #f1f3f5;
+  color: #687381;
+  opacity: 1;
+  cursor: not-allowed;
+}
+.as-original-lock-notice { font-size: 12px; color: #626d79; margin: 0 0 12px; }
+.as-original-lock-notice strong { border: 1px solid #cbd2da; border-radius: 4px; padding: 2px 5px; margin-right: 6px; }
+
 /* recurring toggle */
 
 .recurring-toggle {

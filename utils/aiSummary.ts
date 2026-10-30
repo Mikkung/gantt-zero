@@ -4,6 +4,7 @@ import type {
   Task,
   TaskSelfEvaluation,
 } from '../types';
+import { getTaskNotes } from './taskNotes';
 import {
   getEvaluableTasks,
   getEvaluationTaskIdentity,
@@ -115,8 +116,7 @@ export function getAiSummarySupplementaryTaskRows({
       status: task.status,
       priority: task.priority,
       progress: task.progress,
-      progress_summary: task.progress_summary,
-      description: task.description,
+      description: getTaskNotes(task),
     }));
 }
 

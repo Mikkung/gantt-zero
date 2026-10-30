@@ -258,6 +258,155 @@ function textOf(tree) {
 }
 const button = (tree, label) => elements(tree).find(item => item.type === 'button' && textOf(item) === label);
 
+test('AS original modal locks visible configuration and submits only operational fields while admin/user-added permissions remain unchanged', () => {
+  const { AS_ORIGINAL_EDITABLE_FIELDS, AS_ORIGINAL_LOCK_HELP } = loadTs('utils/asOriginalTaskEditing.ts', { './supabase': { supabase: {} } });
+  const saved = []; const task = { ...parent, start_date: null, end_date: null, status: 'To Do', priority: 'Medium', work_type: null, description: 'Scope', progress_summary: 'Legacy note',
+    output: 'Report', frequency_count: 2, time_per_occurrence_minutes: 90, team_id: 'team-id', dependencies: 'dependency-id',
+    is_recurring: true, recurring_type: 'weekly', recurring_interval: 2, recurring_unit: 'week' };
+  const props = { isOpen: true, task, allTasks: [task], currentUser: profile, onSave: value => saved.push(value), onClose() {}, onDelete() {} };
+  const harness = componentHarness('components/TaskModal.tsx', props); let tree = harness.render();
+  assert.match(textOf(tree), new RegExp(AS_ORIGINAL_LOCK_HELP));
+  for (const value of [task.name, task.weight, 90, 'dependency-id', 'team-id', 'weekly']) {
+    const input = elements(tree).find(node => node.type === 'input' && node.props.value === value); assert.ok(input, String(value)); assert.equal(input.props.disabled, true, String(value));
+  }
+  for (const label of ['Assignee', 'Parent task']) assert.equal(elements(tree).find(node => node.props?.['aria-label'] === label).props.disabled, true);
+  for (const value of ['', 'as_original']) assert.equal(elements(tree).find(node => node.type === 'select' && node.props.value === value).props.disabled, true);
+  for (const node of elements(tree).filter(node => node.type === 'input' && node.props.type === 'checkbox')) assert.equal(node.props.disabled, true);
+  assert.equal(elements(tree).find(node => node.type === 'textarea').props.disabled, false);
+  for (const node of elements(tree).filter(node => node.type === 'input' && ['date', 'range'].includes(node.props.type))) assert.equal(node.props.disabled, false);
+  assert.equal(button(tree, 'Delete'), undefined);
+  button(tree, 'Save changes').props.onClick(); assert.equal(saved.length, 1);
+  assert.deepEqual(Object.keys(saved[0]).sort(), [...AS_ORIGINAL_EDITABLE_FIELDS].sort());
+  assert.equal(saved[0].description, 'Scope\n\nLegacy note'); assert.equal(saved[0].progress_summary, saved[0].description);
+  for (const key of ['id','name','weight','work_type','time_per_occurrence_minutes','assignee','parent_id','team_id','dependencies','is_recurring','task_source']) assert.equal(Object.hasOwn(saved[0], key), false, key);
+  const admin = componentHarness('components/TaskModal.tsx', { ...props, task: { ...task, work_type: 'routine', start_date: parent.start_date }, currentUser: { ...profile, role: 'admin' } });
+  tree = admin.render(); assert.equal(elements(tree).find(node => node.type === 'input' && node.props.value === task.name).props.disabled, false);
+  assert.equal(elements(tree).find(node => node.type === 'input' && node.props.value === 90).props.disabled, false);
+  const added = componentHarness('components/TaskModal.tsx', { ...props, task: child('support', 25, 50) });
+  tree = added.render(); assert.equal(elements(tree).find(node => node.type === 'input' && node.props.value === 'support').props.disabled, false);
+  for (const currentUser of [{ ...profile, role: 'manager' }, { ...profile, display_name: 'Other employee' }]) {
+    const readonly = componentHarness('components/TaskModal.tsx', { ...props, currentUser, canEdit: true }); tree = readonly.render();
+    assert.equal(elements(tree).find(node => node.type === 'textarea').props.disabled, true); assert.equal(button(tree, 'View only').props.disabled, true);
+  }
+});
+
+test('AS original app save uses an explicit RPC payload and refuses null/wrong/zero-row responses without closing the modal', async () => {
+  const previous = global.alert; const alerts = []; global.alert = message => alerts.push(message);
+  const task = { ...parent }; let response; const calls = [];
+  const client = { auth: { getSession: async () => ({ data: { session: { user: { id: profile.id, email: 'staff@example.test' } } } }) },
+    rpc(name, args) { calls.push({ name, args }); return { single: async () => response }; },
+    from(table) { return { select() { return this; }, eq() { return this; }, limit() { return this; }, order() { return this; }, range() { return this; },
+      update() { throw new Error('Normal AS edits must not use direct updates'); },
+      then(resolve) { return Promise.resolve({ data: table === 'profiles' ? [profile] : table === 'tasks' ? [task] : [], error: null }).then(resolve); } }; } };
+  function TaskModal() { return null; } function GanttChart() { return null; }
+  const router = { push() {} };
+  try {
+    const harness = componentHarness('app/page.tsx', {}, client, { 'next/navigation': { useRouter: () => router },
+      '../components/AppShell': { AppShell: () => null }, '../components/GanttChart': { __esModule: true, default: GanttChart },
+      '../components/TaskModal': { __esModule: true, default: TaskModal }, '../components/AddedTaskBulkImportModal': { __esModule: true, default: () => null } });
+    let tree; for (let i = 0; i < 30; i++) { tree = harness.render(); if (elements(tree).some(node => node.type === GanttChart)) break; await new Promise(resolve => setImmediate(resolve)); }
+    elements(tree).find(node => node.type === GanttChart).props.onTaskClick(task); tree = harness.render();
+    for (const invalid of [{ data: null, error: null }, { data: { ...task, id: 'wrong' }, error: null }, { data: null, error: { code: 'PGRST116', message: 'Cannot coerce the result' } }, { data: null, error: { code: '42501', message: 'Only your own tasks' } }]) {
+      response = invalid; await elements(tree).find(node => node.type === TaskModal).props.onSave({ description: 'Changed', weight: 99, name: 'Hacked' }); tree = harness.render();
+      assert.equal(elements(tree).find(node => node.type === TaskModal).props.isOpen, true);
+      assert.equal(elements(tree).find(node => node.type === GanttChart).props.tasks.find(row => row.id === task.id).weight, task.weight);
+    }
+    assert.ok(alerts.every(message => message.startsWith('Cannot update task:')));assert.equal(alerts.some(message => message.includes('Cannot coerce')), false);
+    response = { data: { ...task, description: 'Changed', progress_summary: 'Changed', progress: 55 }, error: null };
+    await elements(tree).find(node => node.type === TaskModal).props.onSave({ name: 'Hacked', description: 'Changed', progress_summary: 'Changed', progress: 55, weight: 99, assignee: 'Other', parent_id: 'Other', task_source: 'user_added' }); tree = harness.render();
+    assert.equal(calls.at(-1).name, 'update_own_as_original_task');assert.deepEqual(calls.at(-1).args.task_changes, { description: 'Changed', progress_summary: 'Changed', progress: 55 });
+    assert.equal(elements(tree).find(node => node.type === TaskModal).props.isOpen, false);
+    const saved = elements(tree).find(node => node.type === GanttChart).props.tasks.find(row => row.id === task.id);assert.equal(saved.description, 'Changed');assert.equal(saved.progress, 55);assert.equal(saved.weight, task.weight);
+  } finally { global.alert = previous; }
+});
+
+test('AS original Gantt schedule/progress edits use the checked RPC while computed progress and manager writes remain blocked', async () => {
+  const previous = global.window;global.window = { innerWidth: 1280, localStorage: { getItem: () => null, setItem() {} }, addEventListener() {}, removeEventListener() {} };
+  const calls = [];const charts = [];let reloads = 0;
+  const computed = { ...parent, id: 'computed', calculated_progress: 50 };
+  const client = { rpc(name, args) { calls.push({ name, args });return { single: async () => ({ data: { ...parent, ...args.task_changes }, error: null }) }; }, from() { throw new Error('Unexpected direct AS update'); } };
+  class Frappe { constructor(container, tasks, options) { charts.push(options); } set_scroll_position() {} }
+  const props = { tasks: [parent, computed], currentUser: profile, onTaskUpdate() { reloads++; }, onTaskClick() {} };
+  try {
+    const harness = componentHarness('components/GanttChart.tsx', props, client, { 'frappe-gantt/dist/frappe-gantt.css': {}, 'frappe-gantt': { __esModule: true, default: Frappe } }, 'default', value => value === null ? { innerHTML: '', addEventListener() {}, removeEventListener() {} } : value);
+    harness.render();let chart = charts.at(-1);
+    await chart.on_progress_change({ id: parent.id }, 65);await chart.on_date_change({ id: parent.id }, new Date('2026-10-01'), new Date('2026-11-30'));
+    assert.equal(calls.length, 2);assert.deepEqual(calls[0].args.task_changes, { progress: 65 });assert.deepEqual(calls[1].args.task_changes, { start_date: '2026-10-01', end_date: '2026-11-30' });assert.equal(reloads, 2);
+    await chart.on_progress_change({ id: computed.id }, 90);assert.equal(calls.length, 2);
+    harness.render({ ...props, currentUser: { ...profile, role: 'manager' } });chart = charts.at(-1);
+    await chart.on_progress_change({ id: parent.id }, 80);await chart.on_date_change({ id: parent.id }, new Date(), new Date());assert.equal(calls.length, 2);
+  } finally { global.window = previous; }
+});
+
+test('unified task notes preserve legacy content, deduplicate complete text and stay stable across repeated saves', () => {
+  const { getTaskNotes, taskNotesPayload } = loadTs('utils/taskNotes.ts');
+  for (const [description, progress_summary, expected] of [
+    [null, null, ''], ['Scope', null, 'Scope'], [null, 'Legacy update', 'Legacy update'],
+    ['Scope', 'Update', 'Scope\n\nUpdate'], ['Scope', 'Scope', 'Scope'],
+    ['Scope\r\nDone', 'Scope\nDone', 'Scope\nDone'],
+    ['Scope\nDone', 'Done\nNext', 'Scope\nDone\nNext'],
+    ['Scope\n\nDone', 'Scope\n\nNext', 'Scope\n\nDone\n\nNext'],
+    ['Scope\nDone\nNext', 'Done', 'Scope\nDone\nNext'],
+    ['Done', 'Scope\nDone\nNext', 'Scope\nDone\nNext'],
+    ['Task 1', 'Task 10', 'Task 1\n\nTask 10'],
+    ['ส่งรายงานแล้ว', 'ตรวจสอบโดยหัวหน้า', 'ส่งรายงานแล้ว\n\nตรวจสอบโดยหัวหน้า'],
+  ]) {
+    const original = { description, progress_summary }; const before = JSON.stringify(original);
+    let text = getTaskNotes(original); assert.equal(text, expected); assert.equal(JSON.stringify(original), before);
+    for (let i = 0; i < 5; i++) text = getTaskNotes(taskNotesPayload(text));
+    assert.equal(text, expected);
+  }
+  assert.deepEqual(taskNotesPayload(''), { description: '', progress_summary: null });
+});
+
+test('TaskModal has one unified notes editor and saves canonical text plus a synchronized legacy mirror', () => {
+  const { getTaskNotes, TASK_NOTES_LABEL } = loadTs('utils/taskNotes.ts');
+  for (const notes of [{ description: 'Scope', progress_summary: 'Progress note' }, { description: null, progress_summary: 'Legacy only' }, { description: 'Description only', progress_summary: null }, { description: 'Same', progress_summary: 'Same' }]) {
+    const task = { ...child('edit', 40, 50), ...notes }; const saved = [];
+    const props = { isOpen: true, task, allTasks: [parent], currentUser: profile, onSave: row => saved.push(row), onClose() {}, onDelete() {} };
+    const harness = componentHarness('components/TaskModal.tsx', props); let tree = harness.render();
+    const editors = elements(tree).filter(item => item.type === 'textarea'); assert.equal(editors.length, 1);
+    assert.equal(editors[0].props.id, 'task-description'); assert.equal(editors[0].props.value, getTaskNotes(task));
+    assert.ok(textOf(tree).includes(TASK_NOTES_LABEL));
+    button(tree, 'Save changes').props.onClick(); assert.equal(saved[0].description, getTaskNotes(task));
+    assert.equal(saved[0].progress_summary, saved[0].description);
+    editors[0].props.onChange({ target: { value: 'Edited unified notes' } }); tree = harness.render();
+    button(tree, 'Save changes').props.onClick(); assert.equal(saved[1].description, 'Edited unified notes'); assert.equal(saved[1].progress_summary, 'Edited unified notes');
+    tree = harness.render({ ...props, task: { ...task, ...saved[1] } }); assert.equal(elements(tree).find(item => item.type === 'textarea').props.value, 'Edited unified notes');
+    assert.equal(saved[1].progress, 40); assert.equal(saved[1].weight, 0); assert.equal(saved[1].user_added_weight, 50);
+    const readonly = componentHarness('components/TaskModal.tsx', { ...props, canEdit: false });
+    assert.equal(elements(readonly.render()).find(item => item.type === 'textarea').props.disabled, true);
+  }
+});
+
+test('unified notes require confirmation to clear both fields and generated summaries append without erasing notes', () => {
+  const previous = global.confirm;
+  try {
+    const saved = []; const task = { ...parent, description: 'Keep the job context', progress_summary: 'Existing progress note' };
+    const props = { isOpen: true, task, allTasks: [task, child('one', 100, 100)], currentUser: profile, onSave: row => saved.push(row), onClose() {}, onDelete() {} };
+    const harness = componentHarness('components/TaskModal.tsx', props); let tree = harness.render();
+    button(tree, 'Generate Summary').props.onClick(); tree = harness.render();
+    const generated = elements(tree).find(item => item.type === 'textarea').props.value;
+    assert.ok(generated.startsWith('Keep the job context\n\nExisting progress note')); assert.ok(generated.length > task.description.length + task.progress_summary.length + 2);
+    button(tree, 'Generate Summary').props.onClick(); tree = harness.render(); assert.equal(elements(tree).find(item => item.type === 'textarea').props.value, generated);
+    elements(tree).find(item => item.type === 'textarea').props.onChange({ target: { value: '' } }); tree = harness.render();
+    global.confirm = () => false; button(tree, 'Save changes').props.onClick(); assert.equal(saved.length, 0);
+    global.confirm = () => true; button(tree, 'Save changes').props.onClick(); assert.equal(saved[0].description, ''); assert.equal(saved[0].progress_summary, null);
+  } finally { global.confirm = previous; }
+});
+
+test('AI supplementary evidence uses unified notes once while official snapshot text, weights and scores stay frozen', () => {
+  const ai = loadTs('utils/aiSummary.ts'); const assessment = loadTs('utils/assessment.ts');
+  const snapshots = assessment.createAssessmentTaskSnapshots('period', profile.display_name, [{ ...parent, progress_summary: 'Frozen assessment notes' }]);
+  const original = JSON.stringify(snapshots);
+  const args = { period: { title: 'Historical period' }, employeeId: profile.display_name, snapshots, taskEvaluations: [{ task_id: parent.id, self_progress_score: 4 }], summaryScope: 'employee_workload', supplementaryTasks: [{ ...child('support', 50, 50), description: 'Scope', progress_summary: 'Latest update' }] };
+  const rows = ai.getAiSummarySupplementaryTaskRows(args);
+  assert.equal(rows[0].description, 'Scope\n\nLatest update'); assert.equal(Object.hasOwn(rows[0], 'progress_summary'), false);
+  const official = ai.getAiSummarySourceRows(args); assert.equal(official[0].progress_summary, 'Frozen assessment notes');
+  assert.equal(official[0].weight, parent.weight); assert.equal(official[0].self_progress_score, 4); assert.equal(JSON.stringify(snapshots), original);
+  assert.ok(ai.buildAiSummaryPrompt(args).includes('Frozen assessment notes'));
+});
+
 test('Gantt colors follow visual completion, preserve status and give blocked tasks red priority', () => {
   const { getGanttProgressVisual } = loadTs('utils/ganttProgress.ts');
   for (const [value, state] of [[0, 'not-started'], [0.01, 'active'], [50, 'active'], [99.99, 'active'], [100, 'complete']]) {
@@ -292,7 +441,7 @@ test('Gantt rebuilds recursive yellow/green bars and blocks computed writes whil
     return { update(payload) { return { async eq(key, id) { writes.push({ payload, key, id }); return { error: null }; } }; } };
   } };
   const a = { ...parent, id: 'a', status: 'Done', end_date: parent.start_date };
-  const b = { ...a, id: 'b', parent_id: a.id, name: 'AS B', weight: 0, status: 'To Do' };
+  const b = { ...a, id: 'b', parent_id: a.id, name: 'AS B', weight: 0, status: 'To Do', description: 'Scope <img src=x onerror=alert(1)>', progress_summary: 'Legacy progress note' };
   const first = { ...child('first', 100, 50), parent_id: b.id, status: 'Done', end_date: a.end_date };
   const second = { ...first, id: 'second', name: 'Second', progress: 0 };
   const editable = { ...first, id: 'editable', name: 'Supporting task', parent_id: a.id, progress: 25, user_added_weight: 0 };
@@ -313,6 +462,9 @@ test('Gantt rebuilds recursive yellow/green bars and blocks computed writes whil
     category.props.onClick();
     tree = harness.render();
     let chart = constructions.at(-1);
+    const popup = chart.options.custom_popup_html({ id: b.id, name: b.name, _start: a.start_date, _end: a.end_date });
+    assert.match(popup, /Description \/ Progress Summary/); assert.match(popup, /Scope &lt;img/); assert.match(popup, /Legacy progress note/);
+    assert.equal(popup.includes('<img'), false);
     for (const id of [a.id, b.id]) {
       assert.equal(chart.tasks.find(task => task.id === id).progress, 50);
       assert.equal(chart.tasks.find(task => task.id === id).custom_class, 'progress-active progress-computed');
@@ -369,7 +521,7 @@ test('TaskModal shows recursive tracking separately and saves recorded progress 
 
 test('Monthly Review uses authorized context while rendering only the selected employee tasks', async () => {
   const reviewer = { ...profile, id: 'admin', role: 'admin' };
-  const a = { ...parent, progress: 15 };
+  const a = { ...parent, progress: 15, description: 'Monthly job scope', progress_summary: 'Monthly legacy update' };
   const b = { ...parent, id: 'b', name: 'Other authorized employee task', assignee: 'Other staff', parent_id: a.id, weight: 0, progress: 20 };
   const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, assignee: 'Other staff', parent_id: 'b' }));
   const calls = [];
@@ -398,12 +550,13 @@ test('Monthly Review uses authorized context while rendering only the selected e
   assert.equal(elements(tree).find(item => item.type === 'progress').props.value, 50);
   assert.equal(textOf(tree).includes(b.name), false);
   assert.match(textOf(tree), /From AS subtasks/);
+  assert.match(textOf(tree), /Monthly job scope\n\nMonthly legacy update/);
   assert.deepEqual(calls.find(call => call.table === 'tasks').filters, {});
 });
 
 test('main views use complete paginated task context for recursive progress', async () => {
   const today = new Date().toISOString().slice(0, 10);
-  const a = { ...parent, start_date: today, end_date: today, progress: 15, status: 'To Do', priority: 'Medium' };
+  const a = { ...parent, start_date: today, end_date: today, progress: 15, status: 'To Do', priority: 'Medium', description: 'List job scope', progress_summary: 'List legacy update' };
   const b = { ...parent, id: 'branch', name: 'Nested AS branch', parent_id: a.id, weight: 0, progress: 20 };
   const activities = [child('one', 100, 50), child('two', 0, 50)].map(task => ({ ...task, parent_id: b.id }));
   const database = [a, ...Array.from({ length: 499 }, (_, i) => ({ ...a, id: `filler-${i}`, name: `Filler ${i}`, weight: 0 })), b, ...activities];
@@ -446,6 +599,7 @@ test('main views use complete paginated task context for recursive progress', as
     const viewElement = elements(tree).find(item => item.type?.name === componentName);
     assert.ok(viewElement, componentName);
     const renderedView = viewElement.type(viewElement.props);
+    if (view === 'list') assert.match(textOf(renderedView), /List job scope\n\nList legacy update/);
     assert.ok(elements(renderedView).some(item => ['tr', 'div', 'button'].includes(item.type) &&
       typeof item.props.onClick === 'function' && textOf(item).includes(a.name) && textOf(item).includes('50%')), `${view} must show recursive tracking progress`);
   }
@@ -657,7 +811,7 @@ test('app save/create/delete persists balance calls and replaces state with auth
   let modal = elements(tree).find(item => item.type === TaskModal);
   assert.equal(modal.props.task.user_added_weight, 50);
   assert.equal(modal.props.task.task_source, 'user_added');
-  await modal.props.onSave({ name: 'Updated child', assignee: profile.display_name, user_added_weight: '60', weight: 100, parent_id: null, task_source: 'as_original', counts_toward_assessment: true, include_in_ai_summary: false });
+  await modal.props.onSave({ name: 'Updated child', assignee: profile.display_name, user_added_weight: '60', weight: 100, parent_id: null, task_source: 'as_original', counts_toward_assessment: true, include_in_ai_summary: false, description: 'Unified persisted notes', progress_summary: 'Unified persisted notes' });
   assert.equal(updates.length, 1);
   assert.equal(updates[0].user_added_weight, 60);
   assert.equal(updates[0].weight, 0);
@@ -671,6 +825,8 @@ test('app save/create/delete persists balance calls and replaces state with auth
   newGantt.props.onTaskClick({ id: 'edit' });
   modal = elements(harness.render()).find(item => item.type === TaskModal);
   assert.equal(modal.props.task.user_added_weight, 60);
+  assert.equal(modal.props.task.description, 'Unified persisted notes');
+  assert.equal(modal.props.task.progress_summary, 'Unified persisted notes');
   assert.equal(modal.props.task.user_added_weight_is_manual, true);
   for (let index = 0; index < 2; index++) {
     const chart = elements(harness.render()).find(item => item.type === GanttChart);

@@ -5,7 +5,7 @@ import 'frappe-gantt/dist/frappe-gantt.css';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 // @ts-ignore
 import Gantt from 'frappe-gantt';
-import { Task } from '../types';
+import { Task, type Profile } from '../types';
 import { supabase } from '../utils/supabase';
 import {
   calculateEffectiveWeightTotal,
@@ -16,9 +16,16 @@ import {
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
 import { getTrackingWeightDisplay } from '../utils/userAddedProgress';
 import { GANTT_PROGRESS_LEGEND, getGanttProgressVisual } from '../utils/ganttProgress';
+import { getTaskNotes } from '../utils/taskNotes';
+import { updateOwnAsOriginalTask } from '../utils/asOriginalTaskEditing';
+
+function escapePopupText(text: string | null | undefined) {
+  return (text ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+}
 
 interface GanttProps {
   tasks: Task[];
+  currentUser?: Profile | null;
   onTaskUpdate: () => void;
   onTaskClick: (task: Task) => void;
   onAddSubtask?: (task: Task) => void;
@@ -224,6 +231,7 @@ function normalizeWorkType(raw: string | null | undefined): string {
 
 export default function GanttChart({
   tasks,
+  currentUser,
   onTaskUpdate,
   onTaskClick,
   onAddSubtask,
@@ -687,6 +695,7 @@ export default function GanttChart({
         const sourceColor = isOriginalAsTask(original) ? '#475569' : '#047857';
         const sourceBg = isOriginalAsTask(original) ? '#f8fafc' : '#ecfdf5';
         const taskWeight = getTrackingWeightDisplay(original);
+        const notes = getTaskNotes(original);
 
         return `
           <div style="
@@ -696,8 +705,11 @@ export default function GanttChart({
             border:1px solid #e2e8f0;
             padding:8px 10px;
             font-size:12px;
+            max-width:min(380px,calc(100vw - 24px));
+            box-sizing:border-box;
+            overflow-wrap:anywhere;
           ">
-            <div style="font-weight:600;color:#0f172a;margin-bottom:4px">${task.name}</div>
+            <div style="font-weight:600;color:#0f172a;margin-bottom:4px">${escapePopupText(task.name)}</div>
             <div style="margin-bottom:4px">
               <span style="display:inline-flex;border-radius:999px;border:1px solid #cbd5e1;background:${sourceBg};color:${sourceColor};padding:2px 7px;font-size:10px;font-weight:700">
                 ${sourceLabel}
@@ -718,10 +730,11 @@ export default function GanttChart({
               original.assignee
                 ? `<div style="color:#64748b">
                      <span>Assignee: </span>
-                     <span style="font-weight:500;color:#0f172a">${original.assignee}</span>
+                     <span style="font-weight:500;color:#0f172a">${escapePopupText(original.assignee)}</span>
                    </div>`
                 : ''
             }
+            ${notes ? `<div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:6px;max-width:360px;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#475569"><strong>Description / Progress Summary</strong><br>${escapePopupText(notes)}</div>` : ''}
           </div>
         `;
       },
@@ -737,10 +750,16 @@ export default function GanttChart({
       },
       on_date_change: async (task: any, start: Date, end: Date) => {
         const original = taskById[task.id];
-        if (!original) return;
+        if (!original || currentUser?.role === 'manager') return;
 
         const newStart = start.toISOString().split('T')[0];
         const newEnd = end.toISOString().split('T')[0];
+
+        if (currentUser?.role === 'user' && isOriginalAsTask(original)) {
+          try { await updateOwnAsOriginalTask(original.id, { start_date: newStart, end_date: newEnd }); onTaskUpdate(); }
+          catch (error) { alert((error as { message?: string })?.message ?? 'Cannot update AS task schedule.'); }
+          return;
+        }
 
         const { error } = await supabase
           .from('tasks')
@@ -753,7 +772,13 @@ export default function GanttChart({
       on_progress_change: async (task: any, progress: number) => {
         const original = taskById[task.id];
         // Frappe mutates its own row before this callback; only leaf/recorded progress may be saved.
-        if (!original || getGanttProgressVisual(original).isComputed) return;
+        if (!original || getGanttProgressVisual(original).isComputed || currentUser?.role === 'manager') return;
+
+        if (currentUser?.role === 'user' && isOriginalAsTask(original)) {
+          try { await updateOwnAsOriginalTask(original.id, { progress }); onTaskUpdate(); }
+          catch (error) { alert((error as { message?: string })?.message ?? 'Cannot update AS task progress.'); }
+          return;
+        }
 
         const { error } = await supabase
           .from('tasks')
@@ -845,6 +870,7 @@ export default function GanttChart({
     viewTo,
     taskById,
     rowSpanById,
+    currentUser,
   ]);
 
   useEffect(() => {

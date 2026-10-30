@@ -8,6 +8,7 @@ import type { Profile, Team } from '../../types';
 import { supabase } from '../../utils/supabase';
 import { getHierarchicalTaskRows, getWorkTypeLabel } from '../../utils/taskGrouping';
 import { formatProgress } from '../../utils/taskProgress';
+import { getTaskNotes } from '../../utils/taskNotes';
 import { calculateTrackingProgressMetrics, getTrackingTaskContext, getTrackingWeightDisplay, getUserAddedProgressRollup, getUserAddedWeightWarning } from '../../utils/userAddedProgress';
 import {
   canAccessMonthlyReviews, canReviewEmployee, formatMonthlyReviewDate,
@@ -300,7 +301,7 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
         <div className={styles.toolbar}><div><h2>{period.name}</h2><p className={styles.muted}>{employee.email} &middot; {teamName}</p></div><Status reviewed={review?.review_status === 'reviewed'} /></div>
         <div className={styles.toolbar}><h2>Current tasks <span className={styles.muted}>({taskRows.length})</span></h2><span className={styles.muted}>Reviewed at: {formatMonthlyReviewDate(review?.reviewed_at)}</span></div>
         {taskRows.length === 0 ? <Notice>No current tasks for this employee.</Notice> : <div className={styles.tableWrap}><table className={styles.taskTable}>
-          <thead><tr><th>Task</th><th>Status</th><th>Progress</th><th>Progress summary</th><th>Official weight</th><th>น้ำหนักย่อย (%)<div className={styles.muted}>Progress only</div></th><th>Work type</th><th>Updated at</th></tr></thead>
+          <thead><tr><th>Task</th><th>Status</th><th>Progress</th><th>Description / Progress Summary</th><th>Official weight</th><th>น้ำหนักย่อย (%)<div className={styles.muted}>Progress only</div></th><th>Work type</th><th>Updated at</th></tr></thead>
           <tbody>{taskRows.map(({ task, depth }) => {
             const rollup = getUserAddedProgressRollup(task, taskContext);
             const warning = getUserAddedWeightWarning(rollup);
@@ -308,7 +309,7 @@ export function MonthlyEmployeePage({ mode }: { mode: MonthlyReviewMode }) {
             return <tr key={task.id}>
             <td style={{ paddingLeft: 12 + Math.min(depth, 8) * 16 }}><div>{task.name}</div>{task.task_source === 'user_added' && <span className={styles.muted}>User-added</span>}</td>
             <td>{task.status}</td><td><div className={styles.progress}><progress max={100} value={displayProgress ?? 0} aria-label={`${task.name} progress`} /><span>{formatProgress(displayProgress)}</span>{trackingMetrics[task.id]?.trackingProgressSource && <span className={styles.muted}>{trackingMetrics[task.id].trackingProgressSource === 'as_children' ? 'From AS subtasks' : 'From user-added subtasks'}</span>}</div></td>
-            <td className={styles.preWrap}>{task.progress_summary || '-'}{warning && <div className={styles.weightWarning}>{warning}</div>}</td><td>{task.weight ?? '-'}</td><td>{task.task_source === 'user_added' ? getTrackingWeightDisplay(task).value : '-'}</td><td>{getWorkTypeLabel(task.work_type)}</td><td>{formatMonthlyReviewDate((task as MonthlyReviewTask).updated_at)}</td>
+            <td className={styles.preWrap}>{getTaskNotes(task) || '-'}{warning && <div className={styles.weightWarning}>{warning}</div>}</td><td>{task.weight ?? '-'}</td><td>{task.task_source === 'user_added' ? getTrackingWeightDisplay(task).value : '-'}</td><td>{getWorkTypeLabel(task.work_type)}</td><td>{formatMonthlyReviewDate((task as MonthlyReviewTask).updated_at)}</td>
           </tr>;
           })}</tbody>
         </table></div>}

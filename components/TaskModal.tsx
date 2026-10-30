@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Task, Profile, TaskFrequencyUnit, TaskSource } from '../types';
 import { formatNumber, formatProgress, generateDeterministicProgressSummary } from '../utils/taskProgress';
 import { getTaskSourceLabel, isOriginalAsTask } from '../utils/taskSource';
+import { getTaskNotes, taskNotesPayload, TASK_NOTES_LABEL } from '../utils/taskNotes';
+import { AS_ORIGINAL_LOCK_HELP, pickAsOriginalTaskChanges } from '../utils/asOriginalTaskEditing';
 import {
   calculateTrackingProgressMetrics, getUserAddedProgressRollup, getUserAddedWeightWarning, parseUserAddedWeight, previewUserAddedWeight,
   USER_ADDED_WEIGHT_HELP, USER_ADDED_WEIGHT_LABEL,
@@ -85,9 +87,13 @@ export default function TaskModal({
   onAutoBalance,
 }: TaskModalProps) {
   const isEdit = !!task;
-  const disabled = !canEdit;
   const isUserRole = currentUser?.role === 'user';
   const isAdminRole = currentUser?.role === 'admin';
+  const lockOriginalFields = isUserRole && !!task && isOriginalAsTask(task);
+  const disabled = !canEdit || currentUser?.role === 'manager' ||
+    (lockOriginalFields && task.assignee !== currentUser?.display_name);
+  const originalFieldProps = { disabled: disabled || lockOriginalFields,
+    title: lockOriginalFields ? AS_ORIGINAL_LOCK_HELP : undefined, 'data-as-locked': lockOriginalFields || undefined };
   const isCreateChildMode = !isEdit && !!fixedParentTask;
   const isExistingUserAddedTask = task?.task_source === 'user_added';
 
@@ -103,7 +109,6 @@ export default function TaskModal({
   const [userAddedWeight, setUserAddedWeight] = useState<number | ''>(task?.user_added_weight ?? 0);
   const [isManualWeight, setIsManualWeight] = useState(task?.user_added_weight_is_manual ?? false);
   const [balancing, setBalancing] = useState(false);
-  const [progressSummary, setProgressSummary] = useState('');
   const [assignee, setAssignee] = useState<string | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
@@ -165,7 +170,7 @@ export default function TaskModal({
     if (task) {
       // ----- Edit mode -----
       setName(task.name);
-      setDescription(task.description ?? '');
+      setDescription(getTaskNotes(task));
       setStartDate(task.start_date);
       setEndDate(task.end_date);
       setStatus(task.status);
@@ -174,7 +179,6 @@ export default function TaskModal({
       setWeight(task.weight ?? 0);
       setUserAddedWeight(task.user_added_weight ?? 0);
       setIsManualWeight(task.user_added_weight_is_manual ?? false);
-      setProgressSummary(task.progress_summary ?? '');
       setAssignee(task.assignee);
       setParentId(task.parent_id ?? null);
       setIsRecurring(task.is_recurring ?? false);
@@ -207,7 +211,6 @@ export default function TaskModal({
       setWeight(0);
       setUserAddedWeight(0);
       setIsManualWeight(false);
-      setProgressSummary('');
       setAssignee(
         isCreateChildMode
           ? currentUser?.role === 'user'
@@ -296,20 +299,20 @@ export default function TaskModal({
         ).toFixed(1);
 
   const handleSubmit = () => {
-    if (!canEdit) {
+    if (disabled) {
       onClose();
       return;
     }
 
-    if (!name.trim()) {
+    if (!name.trim() && !lockOriginalFields) {
       alert('Please enter a task name.');
       return;
     }
-    if (!startDate) {
+    if (!startDate && !lockOriginalFields) {
       alert('Please select a start date.');
       return;
     }
-    if (!workType) {
+    if (!workType && !lockOriginalFields) {
       alert('Please select a work type.');
       return;
     }
@@ -317,7 +320,7 @@ export default function TaskModal({
       alert('Please choose an assignee.');
       return;
     }
-    if (!isUserAddedMode && weight !== '' && Number(weight) < 0) {
+    if (!isUserAddedMode && !lockOriginalFields && weight !== '' && Number(weight) < 0) {
       alert('Weight cannot be negative.');
       return;
     }
@@ -330,11 +333,12 @@ export default function TaskModal({
       alert('Please select an original AS parent task.');
       return;
     }
+    if (getTaskNotes(task) && !description.trim() && !confirm('ล้างรายละเอียดงานและสรุปความคืบหน้าของงานนี้หรือไม่?')) return;
 
-    onSave({
+    const payload: Partial<Task> = {
       id: task?.id,
       name: name.trim(),
-      description: description || '',
+      ...taskNotesPayload(description),
       start_date: startDate,
       end_date: endDate,
       status,
@@ -349,7 +353,6 @@ export default function TaskModal({
         user_added_weight: parsedAddedWeight.value,
         user_added_weight_is_manual: isManualWeight,
       } : {}),
-      progress_summary: progressSummary.trim() || null,
       assignee: isCreateChildMode
         ? currentUser?.role === 'user'
           ? currentUser.display_name
@@ -385,25 +388,26 @@ export default function TaskModal({
         : isAdminRole
           ? includeInAiSummary
           : undefined,
-    });
+    };
+    onSave(lockOriginalFields ? pickAsOriginalTaskChanges(payload) : payload);
   };
 
   const handleDeleteClick = () => {
-    if (!task || !task.id || !canEdit) return;
+    if (!task || !task.id || disabled || lockOriginalFields) return;
     if (!confirm('Delete this task?')) return;
     onDelete(task.id);
   };
 
   // 👇 ใหม่: กด Duplicate
   const handleDuplicateClick = () => {
-    if (!task || !canEdit) return;
+    if (!task || disabled) return;
     if (!onDuplicate) return;
     onDuplicate(task);
   };
 
   const handleGenerateSummary = () => {
     if (!task) return;
-    setProgressSummary(generateDeterministicProgressSummary(task, allTasks));
+    setDescription(current => getTaskNotes({ description: current, progress_summary: generateDeterministicProgressSummary(task, allTasks) }));
   };
 
   const canGenerateSummary =
@@ -492,7 +496,8 @@ export default function TaskModal({
             </div>
           )}
 
-          <div className="modal-form-grid-2">
+          {lockOriginalFields && <p className="as-original-lock-notice"><strong>Locked</strong> {AS_ORIGINAL_LOCK_HELP}</p>}
+          <div className={`modal-form-grid-2${lockOriginalFields ? ' as-original-restricted' : ''}`}>
             {/* Left column */}
             <div>
               <div className="field-label">
@@ -504,18 +509,24 @@ export default function TaskModal({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Prepare weekly report"
-                disabled={disabled}
+                {...originalFieldProps}
               />
 
               <div style={{ marginTop: 10 }}>
-                <div className="field-label">Description</div>
+                <label className="field-label" htmlFor="task-description" style={{ display: 'block', whiteSpace: 'pre-line' }}>{TASK_NOTES_LABEL}</label>
                 <textarea
+                  id="task-description"
                   className="textarea"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Add context, notes, links…"
                   disabled={disabled}
                 />
+                {canGenerateSummary && (
+                  <button type="button" className="btn btn-secondary" onClick={handleGenerateSummary} disabled={disabled} style={{ marginTop: 6 }}>
+                    Generate Summary
+                  </button>
+                )}
               </div>
 
               <div style={{ marginTop: 14 }}>
@@ -555,7 +566,7 @@ export default function TaskModal({
                   onChange={(e) =>
                     setWorkType((e.target.value || '') as WorkType | '')
                   }
-                  disabled={disabled}
+                  {...originalFieldProps}
                 >
                   <option value="">(ไม่ระบุ)</option>
                   {WORK_TYPE_OPTIONS.map((opt) => (
@@ -626,7 +637,7 @@ export default function TaskModal({
                   }
                   placeholder="เช่น 90"
                   min={0}
-                  disabled={disabled}
+                  {...originalFieldProps}
                 />
               </div>
 
@@ -756,6 +767,7 @@ export default function TaskModal({
                     placeholder="0"
                     min={0}
                     step="0.1"
+                    title={originalFieldProps.title}
                     disabled={disabled || !isAdminRole}
                   />
                 </div>
@@ -770,7 +782,7 @@ export default function TaskModal({
               </div>}
               {addedWeightWarning && <div role="status" style={{ marginTop: 10, fontSize: 12, color: '#92400e' }}>{addedWeightWarning}</div>}
 
-              {isAdminRole && !isCreateChildMode && (
+              {((isAdminRole && !isCreateChildMode) || lockOriginalFields) && (
                 <div style={{ marginTop: 12 }}>
                   <div className="field-label">Assessment source flags</div>
                   <div className="field-label-small">Task source</div>
@@ -778,7 +790,7 @@ export default function TaskModal({
                     className="select"
                     value={taskSource}
                     onChange={(e) => setTaskSource(e.target.value as TaskSource)}
-                    disabled={disabled || isExistingUserAddedTask}
+                    disabled={disabled || isExistingUserAddedTask || lockOriginalFields}
                   >
                     <option value="as_original">AS Original</option>
                     <option value="admin_added">Admin Added</option>
@@ -800,7 +812,7 @@ export default function TaskModal({
                       onChange={(e) =>
                         setCountsTowardAssessment(e.target.checked)
                       }
-                      disabled={disabled || isUserAddedMode}
+                      disabled={disabled || isUserAddedMode || lockOriginalFields}
                     />
                     Counts toward assessment
                   </label>
@@ -818,34 +830,12 @@ export default function TaskModal({
                       type="checkbox"
                       checked={isUserAddedMode ? true : includeInAiSummary}
                       onChange={(e) => setIncludeInAiSummary(e.target.checked)}
-                      disabled={disabled || isUserAddedMode}
+                      disabled={disabled || isUserAddedMode || lockOriginalFields}
                     />
                     Include in AI summary
                   </label>
                 </div>
               )}
-
-              <div style={{ marginTop: 12 }}>
-                <div className="field-label">Progress Summary</div>
-                <textarea
-                  className="textarea"
-                  value={progressSummary}
-                  onChange={(e) => setProgressSummary(e.target.value)}
-                  placeholder="Optional progress note for this task"
-                  disabled={disabled}
-                />
-                {canGenerateSummary && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={handleGenerateSummary}
-                    disabled={disabled}
-                    style={{ marginTop: 6 }}
-                  >
-                    Generate Summary
-                  </button>
-                )}
-              </div>
 
               {/* Assignee */}
               <div style={{ marginTop: 12 }}>
@@ -853,7 +843,7 @@ export default function TaskModal({
                   Assignee
                   <RequiredMark />
                 </div>
-                {isCreateChildMode || isUserRole ? (
+                {lockOriginalFields ? <input className="input" aria-label="Assignee" value={assignee ?? ''} {...originalFieldProps}/> : isCreateChildMode || isUserRole ? (
                   <div
                     className="input"
                     style={{
@@ -886,7 +876,7 @@ export default function TaskModal({
 
               <div style={{ marginTop: 12 }}>
                 <div className="field-label">Parent task</div>
-                {isCreateChildMode || isExistingUserAddedTask ? (
+                {lockOriginalFields ? <input className="input" aria-label="Parent task" value={allTasks.find(candidate => candidate.id === task.parent_id)?.name ?? task.parent_id ?? 'No parent'} {...originalFieldProps}/> : isCreateChildMode || isExistingUserAddedTask ? (
                   <div
                     className="input"
                     style={{
@@ -903,7 +893,7 @@ export default function TaskModal({
                     className="select"
                     value={parentId ?? ''}
                     onChange={(e) => setParentId(e.target.value || null)}
-                    disabled={disabled}
+                    {...originalFieldProps}
                   >
                     <option value="">No parent</option>
                     {parentOptions.map((t) => (
@@ -929,9 +919,17 @@ export default function TaskModal({
                   value={dependencies ?? ''}
                   onChange={(e) => setDependencies(e.target.value || null)}
                   placeholder="task-id-1, task-id-2"
-                  disabled={disabled}
+                  {...originalFieldProps}
                 />
               </div>
+              {lockOriginalFields && <div style={{ marginTop: 12 }}>
+                <label className="field-label">Team ID<input className="input" value={task.team_id ?? ''} {...originalFieldProps}/></label>
+                <div className="field-label" style={{ marginTop: 12 }}>Recurring settings</div>
+                <label><input type="checkbox" checked={task.is_recurring ?? false} {...originalFieldProps}/> Recurring</label>
+                <label className="field-label-small">Recurring type<input className="input" value={task.recurring_type ?? ''} {...originalFieldProps}/></label>
+                <label className="field-label-small">Recurring interval<input className="input" type="number" value={task.recurring_interval ?? ''} {...originalFieldProps}/></label>
+                <label className="field-label-small">Recurring unit<input className="input" value={task.recurring_unit ?? ''} {...originalFieldProps}/></label>
+              </div>}
             </div>
           </div>
         </div>
@@ -939,15 +937,15 @@ export default function TaskModal({
         {/* footer */}
         <div className="modal-footer">
           <div style={{ display: 'flex', gap: 8 }}>
-            {isEdit && canEdit && (
+            {isEdit && !disabled && (
               <>
-                <button
+                {!lockOriginalFields && <button
                   type="button"
                   className="btn btn-ghost"
                   onClick={handleDeleteClick}
                 >
                   Delete
-                </button>
+                </button>}
 
                 {/* 👇 ปุ่ม Duplicate ใหม่ */}
                 {onDuplicate && (
@@ -981,7 +979,7 @@ export default function TaskModal({
               gap: 8,
             }}
           >
-            {!canEdit && (
+            {disabled && (
               <span
                 style={{
                   fontSize: 11,
@@ -1003,9 +1001,9 @@ export default function TaskModal({
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={!canEdit || balancing}
+              disabled={disabled || balancing}
             >
-              {canEdit
+              {!disabled
                 ? isEdit
                   ? 'Save changes'
                   : 'Create task'
