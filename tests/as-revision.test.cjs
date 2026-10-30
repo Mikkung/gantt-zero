@@ -19,7 +19,7 @@ function loadTs(filename, overrides={}, cache=new Map()) {
 const ids={admin:'10000000-0000-0000-0000-000000000001',user:'10000000-0000-0000-0000-000000000002',manager:'10000000-0000-0000-0000-000000000003',other:'10000000-0000-0000-0000-000000000004',
   team:'20000000-0000-0000-0000-000000000001',otherTeam:'20000000-0000-0000-0000-000000000002',a:'30000000-0000-0000-0000-000000000001',b:'30000000-0000-0000-0000-000000000002',c:'30000000-0000-0000-0000-000000000003',added:'30000000-0000-0000-0000-000000000004',excluded:'30000000-0000-0000-0000-000000000005',otherTask:'30000000-0000-0000-0000-000000000006'};
 const migration=name=>fs.readFileSync('supabase/migrations/'+name,'utf8');
-async function fixture(stage=1, draftTaskSupport=true, originalExclusion=true) {
+async function fixture(stage=1, draftTaskSupport=true, originalExclusion=true, operationalEditing=true) {
   const {PGlite}=require(process.env.MONTHLY_REVIEW_PGLITE_PATH);const db=new PGlite();
   await db.exec(`CREATE ROLE authenticated;CREATE ROLE anon;CREATE SCHEMA auth;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
@@ -52,12 +52,87 @@ async function fixture(stage=1, draftTaskSupport=true, originalExclusion=true) {
   if(stage>=3&&draftTaskSupport)await db.exec(migration('20261026020000_as_revision_task_selection_and_new_tasks.sql'));
   if(stage>=3&&draftTaskSupport)await db.exec(migration('20261026030000_as_revision_delete_unpublished_period.sql'));
   if(stage>=3&&draftTaskSupport&&originalExclusion)await db.exec(migration('20261026040000_as_revision_original_task_exclusion.sql'));
+  if(stage>=3&&draftTaskSupport&&originalExclusion&&operationalEditing)await db.exec(migration('20261030000000_allow_own_as_original_operational_edits.sql'));
   const login=async id=>{await db.exec('RESET ROLE');await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('SET ROLE authenticated');};
   const rpc=async(name,args)=> (await db.query(`SELECT to_jsonb(${name}(${args.map((_,i)=>'$'+(i+1)).join(',')})) AS result`,args)).rows[0].result;
   await login(ids.admin);
   const period=await rpc('as_revision_save_period',[null,JSON.stringify({title:'AS 2027',year:2027,cycle:'Annual',starts_at:'2020-01-01T00:00:00Z',ends_at:'2099-01-01T00:00:00Z',eligible_profile_ids:[ids.user,ids.other],eligible_team_ids:[]}),0]);
   return {db,login,rpc,period};
 }
+test('AS operational editing reproduces zero-row restrictive-policy behavior and returns one owned row through the checked RPC',{skip:!process.env.MONTHLY_REVIEW_PGLITE_PATH},async()=>{
+  const {db,login,rpc}=await fixture(3,true,true,false);
+  try{
+    await login(ids.user);
+    const policy=(await db.query("SELECT permissive FROM pg_policies WHERE policyname='user_added_tasks_update_guard'")).rows[0];assert.equal(policy.permissive,'RESTRICTIVE');
+    assert.equal((await db.query('UPDATE tasks SET description=$1 WHERE id=$2 RETURNING *',['Before fix',ids.a])).rows.length,0);
+    await db.exec('RESET ROLE');await db.exec(migration('20261030000000_allow_own_as_original_operational_edits.sql'));
+    const before=(await db.query('SELECT * FROM tasks WHERE id=$1',[ids.a])).rows[0];
+    const snapshots=(await db.query('SELECT * FROM assessment_task_snapshots ORDER BY id')).rows;
+    await login(ids.user);
+    const changes={description:'Scope\n\nProgress update',progress_summary:'Scope\n\nProgress update',start_date:'2026-10-01',end_date:'2026-11-30',output:'Report',frequency_count:2.5,frequency_unit:'semester',priority:'High',status:'In Progress',progress:35};
+    const saved=await rpc('update_own_as_original_task',[ids.a,JSON.stringify(changes)]);
+    assert.equal(saved.id,ids.a);for(const [key,value] of Object.entries(changes))assert.equal(saved[key],value,key);
+    const after=(await db.query('SELECT * FROM tasks WHERE id=$1',[ids.a])).rows[0];
+    const allowed=new Set(Object.keys(changes));for(const key of Object.keys(before))if(!allowed.has(key))assert.deepEqual(after[key],before[key],key);
+    assert.deepEqual((await db.query('SELECT * FROM assessment_task_snapshots ORDER BY id')).rows,snapshots);
+    await rpc('update_own_as_original_task',[ids.a,JSON.stringify({priority:'Low'})]);
+    const later=await rpc('update_own_as_original_task',[ids.a,JSON.stringify({description:'Edited again'})]);
+    assert.equal(later.priority,'Low');assert.equal(later.progress,35);assert.equal(later.output,'Report');
+    for(const bad of [{progress:101},{progress:-1},{progress:'10'},{frequency_count:-1},{frequency_count:'2'},{frequency_unit:'week'},{priority:'Urgent'},{status:'Todo'},{start_date:'10/11/26'},{end_date:'2026-02-30'},{start_date:'2027-01-01',end_date:'2026-01-01'},{description:{unexpected:true}},{}])
+      await assert.rejects(rpc('update_own_as_original_task',[ids.a,JSON.stringify(bad)]));
+    await assert.rejects(rpc('update_own_as_original_task',['99999999-0000-0000-0000-000000000001','{"description":"Missing"}']),/not found/);
+    await assert.rejects(rpc('update_own_as_original_task',[ids.otherTask,'{"description":"Not mine"}']),/only your own/);
+    await assert.rejects(rpc('update_own_as_original_task',[ids.added,'{"description":"Wrong flow"}']),/only for original/);
+  }finally{await db.close();}
+});
+
+test('AS operational editing rejects protected fields and direct policy bypass while retaining admin, user-added and publication permissions',{skip:!process.env.MONTHLY_REVIEW_PGLITE_PATH},async()=>{
+  const {db,login,rpc,period}=await fixture(3);
+  try{
+    await db.exec('RESET ROLE');await db.exec('CREATE POLICY legacy_permissive_update_test ON tasks FOR UPDATE TO authenticated USING(true) WITH CHECK(true)');
+    await login(ids.user);
+    for(const change of [{name:'Rename'},{weight:99},{assignee:'Staff B'},{team_id:ids.otherTeam},{parent_id:ids.b},{task_source:'user_added'},{counts_toward_assessment:false},{include_in_ai_summary:false},{work_type:'other'},{time_per_occurrence_minutes:100},{dependencies:ids.c},{is_recurring:true},{recurring_type:'weekly'},{user_added_weight:50},{user_added_weight_is_manual:true},{updated_at:'2026-10-01'},{id:ids.b},{as_archived_at:'2026-10-01'}])
+      await assert.rejects(rpc('update_own_as_original_task',[ids.a,JSON.stringify(change)]),/Protected or unknown/);
+    for(const change of ["name='Bypass'","weight=99","assignee='Staff B'","task_source='user_added'","description='Even allowed fields use RPC'"])
+      assert.equal((await db.query(`UPDATE tasks SET ${change} WHERE id=$1 RETURNING id`,[ids.a])).rows.length,0);
+    await db.exec('RESET ROLE');
+    await db.exec(`CREATE FUNCTION test_unsafe_as_update(task_id uuid) RETURNS void LANGUAGE sql SECURITY DEFINER AS $$ UPDATE public.tasks SET name='Definer bypass' WHERE id=task_id $$; GRANT EXECUTE ON FUNCTION test_unsafe_as_update(uuid) TO authenticated;`);
+    await login(ids.user);await assert.rejects(rpc('test_unsafe_as_update',[ids.a]),/Protected AS fields/);
+    assert.equal((await db.query("UPDATE tasks SET description='Other employee' WHERE id=$1 RETURNING id",[ids.otherTask])).rows.length,0);
+    const added=await rpc('update_user_added_task',[ids.added,'{"name":"User-added still editable","description":"Own supporting notes","progress_summary":"Own supporting notes","user_added_weight":70}']);
+    assert.equal(added.name,'User-added still editable');assert.equal(added.weight,0);assert.equal(added.user_added_weight,70);
+    await login(ids.manager);await assert.rejects(rpc('update_own_as_original_task',[ids.a,'{"description":"Manager edit"}']),/Only authenticated users/);
+    assert.equal((await db.query("UPDATE tasks SET description='Manager direct' WHERE id=$1 RETURNING id",[ids.a])).rows.length,0);
+    await db.exec('RESET ROLE; SET ROLE anon');await assert.rejects(rpc('update_own_as_original_task',[ids.a,'{"progress":10}']),/permission denied/);
+    await login(ids.admin);await db.query("UPDATE tasks SET name='Admin renamed AS',weight=80,work_type='strategic' WHERE id=$1",[ids.a]);
+    const original=(await db.query('SELECT * FROM tasks WHERE id=$1',[ids.a])).rows[0];assert.equal(original.name,'Admin renamed AS');assert.equal(Number(original.weight),80);
+    await assert.rejects(rpc('update_own_as_original_task',[ids.a,'{"progress":10}']),/Only authenticated users/);
+    // Legitimate approved publication still passes the new trigger's private exemption.
+    await rpc('as_revision_set_period_status',[period.id,'open',0]);
+    const request=(await db.query("SELECT * FROM as_revision_requests WHERE employee_id='Staff A'")).rows[0];
+    await login(ids.user);await rpc('as_revision_submit',[request.id,0,true]);await login(ids.manager);
+    const workspace=await rpc('as_revision_workspace',[request.id]);
+    for(const item of workspace.items.filter(item=>item.kind==='original'))await rpc('as_revision_review',[request.id,item.id,'approve','',1]);
+    assert.equal((await rpc('as_revision_workspace',[request.id])).request.status,'published');
+  }finally{await db.close();}
+});
+
+test('AS operational editing reports suppressed updates and archived rows instead of returning empty successful objects',{skip:!process.env.MONTHLY_REVIEW_PGLITE_PATH},async()=>{
+  const {db,login,rpc}=await fixture(3);
+  try{
+    await db.exec(`RESET ROLE; CREATE FUNCTION suppress_as_update_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.description='Suppress update' THEN RETURN NULL; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER a_suppress_as_update BEFORE UPDATE ON tasks FOR EACH ROW EXECUTE FUNCTION suppress_as_update_test();`);
+    await login(ids.user);await assert.rejects(rpc('update_own_as_original_task',[ids.a,'{"description":"Suppress update"}']),/was not updated/);
+    assert.equal((await db.query('SELECT description FROM tasks WHERE id=$1',[ids.a])).rows[0].description,null);
+    await db.exec("RESET ROLE;SELECT set_config('request.jwt.claim.sub','',false)");
+    await db.query('UPDATE tasks SET as_archived_at=now() WHERE id=$1',[ids.c]);
+    await db.query('UPDATE tasks SET task_source=NULL WHERE id=$1',[ids.a]);
+    await login(ids.user);await assert.rejects(rpc('update_own_as_original_task',[ids.c,'{"progress":10}']),/Archived/);
+    const legacy=await rpc('update_own_as_original_task',[ids.a,'{"description":"Legacy AS still owned"}']);
+    assert.equal(legacy.description,'Legacy AS still owned');assert.equal(legacy.task_source,null);
+  }finally{await db.close();}
+});
+
 test('milestone 1: foundation authorization, immutable baseline and separate revision window',{skip:!process.env.MONTHLY_REVIEW_PGLITE_PATH},async()=>{
   const {db,login,rpc,period}=await fixture();
   try {
